@@ -4,19 +4,26 @@ import QtQuick.Controls
 // Import components directly 
 import "." // Import local directory components
 
-ColumnLayout {
-    Layout.fillWidth: true
-    Layout.fillHeight: true
-    Layout.minimumHeight: 400
-    Layout.minimumWidth: 400
-
-    VideoPreview {
+Item {
+    id: mainContentRoot
+    
+    // Main content layout
+    ColumnLayout {
+        anchors.fill: parent
         Layout.fillWidth: true
         Layout.fillHeight: true
-    }
+        Layout.minimumHeight: 400
+        Layout.minimumWidth: 400
+        z: 1  // Base layer
 
-    ControlButtons {
-        Layout.fillWidth: true
-        Layout.preferredHeight: 50
+        VideoPreview {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+        }
+
+        ControlButtons {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 50
+        }
     }
 }
