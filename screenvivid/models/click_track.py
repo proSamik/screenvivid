@@ -63,48 +63,63 @@ class ClipTrackModel(QAbstractListModel):
 
     @Slot()
     def cut_clip(self):
-        if self._clicked_events:
-            index, position = self._clicked_events
-            if 0 <= index < len(self._clips):
-                clip = self._clips[index]
-                if position < clip.width:
-                    # Store the original state for undo
-                    original_clip = ClipTrack(clip.x, clip.width, clip.clip_len)
+        """Cut clip at the current position."""
+        from screenvivid.utils.logging import logger
+        
+        if len(self._clicked_events) == 0:
+            logger.warning("No clicked events to cut clip")
+            return
 
-                    def do_cut():
-                        # Create a new clip
-                        new_clip = ClipTrack(clip.x + position, clip.width - position, (clip.width - position) / config.DEFAULT_PIXELS_PER_FRAME / self._video_fps)
+        # Get last clicked event
+        clicked_event = self._clicked_events[-1]
+        logger.info(f"Cutting clip at event: {clicked_event}")
+        
+        # Clear clicked events
+        self._clicked_events = []
 
-                        # Update the current clip
-                        clip.width = position
-                        clip.clip_len = clip.width / config.DEFAULT_PIXELS_PER_FRAME / self._video_fps
+        index = clicked_event.get("index")
+        x = clicked_event.get("x")
 
-                        # Inset the new one
-                        self._clips.insert(index + 1, new_clip)
+        logger.info(f"Cutting clip at index {index} at position {x}")
 
-                        # Notify
-                        self.layoutChanged.emit()
-                        self._update_undo_redo_signals()
+        def do_cut_clip():
+            clipTrack = ClipTrack(
+                self._clips[index].x + x,
+                self._clips[index].width - x,
+                self._clips[index].clip_len - int(x / config.DEFAULT_PIXELS_PER_FRAME),
+            )
+            self._clips[index].width = x
+            self._clips[index].clip_len = int(x / config.DEFAULT_PIXELS_PER_FRAME)
+            self._clips.insert(index + 1, clipTrack)
+            
+            # Log the resulting clips
+            for i, clip in enumerate(self._clips):
+                logger.info(f"Clip {i}: x={clip.x}, width={clip.width}, len={clip.clip_len}")
+                
+            # Important - notify positions immediately
+            self._notify_clip_positions()
+            
+            self.dataChanged.emit(self.index(index), self.index(self.rowCount()))
+            self.layoutChanged.emit()
+            self.canUndoChanged.emit(self.undo_redo_manager.can_undo())
+            self.canRedoChanged.emit(self.undo_redo_manager.can_redo())
 
-                    def undo_cut():
-                        # Restore the original clip
-                        self._clips[index].x = original_clip.x
-                        self._clips[index].width = original_clip.width
-                        self._clips[index].clip_len = original_clip.clip_len
+        def undo_cut_clip():
+            if index + 1 < len(self._clips):
+                self._clips[index].width += self._clips[index + 1].width
+                self._clips[index].clip_len += self._clips[index + 1].clip_len
+                self._clips.pop(index + 1)
+                
+                # Important - notify positions immediately
+                self._notify_clip_positions()
+                
+                self.dataChanged.emit(self.index(index), self.index(self.rowCount()))
+                self.layoutChanged.emit()
+                self.canUndoChanged.emit(self.undo_redo_manager.can_undo())
+                self.canRedoChanged.emit(self.undo_redo_manager.can_redo())
 
-                        # Remove the new clip that was added
-                        if index + 1 < len(self._clips):
-                            self._clips.pop(index + 1)
-
-                        # Notify
-                        self.layoutChanged.emit()
-                        self._update_undo_redo_signals()
-
-                    # Perform the cut action and add it to the undo/redo manager
-                    self.undo_redo_manager.do_action(do_cut, (do_cut, undo_cut))
-
-        # Reset the clicked events after cutting
-        self.reset_cut_clip_data()
+        logger.info("Performing clip cut operation")
+        self.undo_redo_manager.do_action(do_cut_clip, (do_cut_clip, undo_cut_clip))
 
     @Slot(int)
     def delete_clip(self, index):
@@ -164,10 +179,18 @@ class ClipTrackModel(QAbstractListModel):
 
     @Slot(int, float)
     def set_cut_clip_data(self, index, x):
-        self._clicked_events = [index, x]
-
+        """Store clicked event data for cut operation"""
+        from screenvivid.utils.logging import logger
+        
+        logger.info(f"Setting cut clip data: index={index}, x={x}")
+        self._clicked_events.append({"index": index, "x": x})
+        
     @Slot()
     def reset_cut_clip_data(self):
+        """Reset clicked event data"""
+        from screenvivid.utils.logging import logger
+        
+        logger.info("Resetting cut clip data")
         self._clicked_events = []
 
     @Slot()
@@ -175,20 +198,26 @@ class ClipTrackModel(QAbstractListModel):
         """Notify the VideoController about the current clip positions for cut detection"""
         from screenvivid.utils.logging import logger
         
-        # Use the saved video_controller property
-        if self._video_controller and hasattr(self._video_controller, 'video_processor'):
+        logger.info(f"Notifying clip positions: {len(self._clips)} clips found")
+        
+        # Access the video_controller directly if it's available as a property
+        video_controller = self._video_controller
+        
+        if video_controller and hasattr(video_controller, 'video_processor'):
             try:
                 # Convert clips to a format that VideoController can use
                 clip_positions = []
-                for clip in self._clips:
+                for i, clip in enumerate(self._clips):
                     pos = {
                         "start_frame": int(clip.x / config.DEFAULT_PIXELS_PER_FRAME),
                         "end_frame": int((clip.x + clip.width) / config.DEFAULT_PIXELS_PER_FRAME)
                     }
                     clip_positions.append(pos)
+                    logger.info(f"  Clip {i}: frames {pos['start_frame']} to {pos['end_frame']}")
                 
                 # Update the VideoController with clip positions
-                self._video_controller.video_processor.set_clip_positions(clip_positions)
+                video_controller.video_processor.set_clip_positions(clip_positions)
+                logger.info(f"Clip positions sent to VideoController: {len(clip_positions)} clips")
             except Exception as e:
                 logger.warning(f"Error processing clip positions: {e}")
         else:
