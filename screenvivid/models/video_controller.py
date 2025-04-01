@@ -522,15 +522,44 @@ class VideoControllerModel(QObject):
 
     @Slot(int, int, dict)
     def add_text_card(self, start_frame, end_frame, card_data):
-        """Add a text card between the specified frames"""
+        """Add a text card to the video"""
+        from screenvivid.utils.logging import logger
+        
         def do_add_text_card():
-            self.video_processor.add_text_card(start_frame, end_frame, card_data)
+            # Create the text card with the provided data
+            card = {
+                'start_frame': start_frame,
+                'end_frame': end_frame,
+                'params': card_data
+            }
+            
+            # Add to the list and sort by start frame
+            self.video_processor._text_cards.append(card)
+            self.video_processor._text_cards.sort(key=lambda x: x['start_frame'])
+            
+            # Update video length if needed - important for playback to continue to the end
+            old_video_len = self.video_processor._video_len
+            new_end_frame = max(end_frame, self.video_processor._end_frame)
+            
+            if new_end_frame > self.video_processor._end_frame:
+                logger.info(f"Extending video length to include text card: old end={self.video_processor._end_frame}, new end={new_end_frame}")
+                self.video_processor._end_frame = new_end_frame
+                self.video_processor._video_len = new_end_frame - self.video_processor._start_frame
+                self.videoLenChanged.emit()
+            
+            # Notify about the change
+            self.textCardsChanged.emit()
             logger.info(f"Added text card: {start_frame}-{end_frame}")
-
+        
         def undo_add_text_card():
-            self.video_processor.remove_text_card(start_frame, end_frame)
-            logger.info(f"Undid add text card: {start_frame}-{end_frame}")
-
+            # Remove the last added card with the same frame range
+            for i, card in enumerate(self.video_processor._text_cards):
+                if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
+                    self.video_processor._removed_text_cards.append(self.video_processor._text_cards.pop(i))
+                    self.textCardsChanged.emit()
+                    logger.info(f"Removed text card: {start_frame}-{end_frame}")
+                    break
+        
         self.undo_redo_manager.do_action(do_add_text_card, (do_add_text_card, undo_add_text_card))
 
     @Slot(int, int)
@@ -1319,33 +1348,45 @@ class VideoProcessor(QObject):
         self._clip_positions = positions
     
     def add_text_card(self, start_frame, end_frame, card_data):
-        """
-        Add a text card to the video
+        """Add a text card to the video"""
+        from screenvivid.utils.logging import logger
         
-        Parameters:
-        - start_frame: Start frame for the text card
-        - end_frame: End frame for the text card
-        - card_data: Dictionary with text card parameters
-        """
-        text_card = {
-            'start_frame': start_frame,
-            'end_frame': end_frame,
-            'params': card_data  # Change 'card_data' to 'params' to match QML property expectations
-        }
+        def do_add_text_card():
+            # Create the text card with the provided data
+            card = {
+                'start_frame': start_frame,
+                'end_frame': end_frame,
+                'params': card_data
+            }
+            
+            # Add to the list and sort by start frame
+            self.video_processor._text_cards.append(card)
+            self.video_processor._text_cards.sort(key=lambda x: x['start_frame'])
+            
+            # Update video length if needed - important for playback to continue to the end
+            old_video_len = self.video_processor._video_len
+            new_end_frame = max(end_frame, self.video_processor._end_frame)
+            
+            if new_end_frame > self.video_processor._end_frame:
+                logger.info(f"Extending video length to include text card: old end={self.video_processor._end_frame}, new end={new_end_frame}")
+                self.video_processor._end_frame = new_end_frame
+                self.video_processor._video_len = new_end_frame - self.video_processor._start_frame
+                self.videoLenChanged.emit()
+            
+            # Notify about the change
+            self.textCardsChanged.emit()
+            logger.info(f"Added text card: {start_frame}-{end_frame}")
         
-        # Check if this overlaps with an existing text card
-        for i, card in enumerate(self._text_cards):
-            if (start_frame <= card['end_frame'] and end_frame >= card['start_frame']):
-                # Overlapping card, replace it
-                self._text_cards[i] = text_card
-                self.textCardsChanged.emit()
-                return
+        def undo_add_text_card():
+            # Remove the last added card with the same frame range
+            for i, card in enumerate(self.video_processor._text_cards):
+                if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
+                    self.video_processor._removed_text_cards.append(self.video_processor._text_cards.pop(i))
+                    self.textCardsChanged.emit()
+                    logger.info(f"Removed text card: {start_frame}-{end_frame}")
+                    break
         
-        # Add new card
-        self._text_cards.append(text_card)
-        self._text_cards.sort(key=lambda x: x['start_frame'])
-        self.textCardsChanged.emit()
-        logger.info(f"Added text card: {start_frame}-{end_frame}, params: {card_data}")  # Add debugging info
+        self.undo_redo_manager.do_action(do_add_text_card, (do_add_text_card, undo_add_text_card))
     
     def remove_text_card(self, start_frame, end_frame):
         """Remove a text card that matches the given frame range"""
