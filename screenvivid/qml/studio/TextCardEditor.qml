@@ -34,9 +34,11 @@ Rectangle {
     property string verticalAlign: "middle"
     property alias text: textArea.text
     property real cardDuration: 3.0  // seconds
+    property real textSize: 1.0      // text size multiplier (1.0 = normal)
     property bool isEditMode: false
     property int startFrame: -1
     property int endFrame: -1
+    property bool createGapOnApply: false  // Whether to create a gap when applying
     
     // Signals
     signal applyCard()
@@ -50,7 +52,8 @@ Rectangle {
             "text_color": selectedTextColor,
             "duration_seconds": cardDuration,
             "horizontal_align": horizontalAlign,
-            "vertical_align": verticalAlign
+            "vertical_align": verticalAlign,
+            "text_size": textSize
         }
     }
     
@@ -61,6 +64,7 @@ Rectangle {
         cardDuration = data.duration_seconds || 3.0
         horizontalAlign = data.horizontal_align || "center"
         verticalAlign = data.vertical_align || "middle"
+        textSize = data.text_size || 1.0
     }
     
     ScrollView {
@@ -108,6 +112,7 @@ Rectangle {
                         background: null
                         selectByMouse: true
                         text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Edit this text."
+                        font.pointSize: 12 * textSize // Base size * multiplier
                         
                         horizontalAlignment: {
                             if (horizontalAlign === "left") return Text.AlignLeft
@@ -346,6 +351,64 @@ Rectangle {
                     
                     Text {
                         text: "seconds"
+                        color: "white"
+                    }
+                }
+                
+                // Text size control
+                Text {
+                    text: "Text Size:"
+                    color: "white"
+                }
+                
+                RowLayout {
+                    spacing: 5
+                    
+                    Slider {
+                        id: textSizeSlider
+                        from: 0.5
+                        to: 2.0
+                        value: textSize
+                        stepSize: 0.1
+                        snapMode: Slider.SnapAlways
+                        
+                        onValueChanged: {
+                            textSize = value
+                            textArea.font.pointSize = 12 * textSize // Base size * multiplier
+                        }
+                        
+                        Layout.preferredWidth: 120
+                        
+                        background: Rectangle {
+                            x: textSizeSlider.leftPadding
+                            y: textSizeSlider.topPadding + textSizeSlider.availableHeight / 2 - height / 2
+                            width: textSizeSlider.availableWidth
+                            height: 4
+                            radius: 2
+                            color: "#333333"
+                            
+                            Rectangle {
+                                width: textSizeSlider.visualPosition * parent.width
+                                height: parent.height
+                                color: "#545EEE"
+                                radius: 2
+                            }
+                        }
+                        
+                        handle: Rectangle {
+                            x: textSizeSlider.leftPadding + textSizeSlider.visualPosition * (textSizeSlider.availableWidth - width)
+                            y: textSizeSlider.topPadding + textSizeSlider.availableHeight / 2 - height / 2
+                            width: 16
+                            height: 16
+                            radius: 8
+                            color: textSizeSlider.pressed ? "#7BD57F" : "#545EEE"
+                            border.color: "#7BD57F"
+                            border.width: textSizeSlider.pressed ? 2 : 0
+                        }
+                    }
+                    
+                    Text {
+                        text: textSize.toFixed(1) + "×"
                         color: "white"
                     }
                 }

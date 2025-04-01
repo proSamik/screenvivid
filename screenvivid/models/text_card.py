@@ -10,7 +10,8 @@ class TextCard(QObject):
     """
     
     def __init__(self, background_color="black", text="", text_color="white", 
-                 duration_seconds=3, horizontal_align="center", vertical_align="middle"):
+                 duration_seconds=3, horizontal_align="center", vertical_align="middle",
+                 text_size=1.0):
         """
         Initialize TextCard with default parameters
         
@@ -21,6 +22,7 @@ class TextCard(QObject):
             duration_seconds (float): Duration in seconds
             horizontal_align (str): "left", "center", or "right"
             vertical_align (str): "top", "middle", or "bottom"
+            text_size (float): Size multiplier for text (1.0 = normal size)
         """
         super().__init__()
         self.background_color = background_color  # "black" or "white"
@@ -29,6 +31,7 @@ class TextCard(QObject):
         self.duration_seconds = duration_seconds
         self.horizontal_align = horizontal_align  # "left", "center", "right"
         self.vertical_align = vertical_align  # "top", "middle", "bottom"
+        self.text_size = text_size  # Size multiplier
         
         # Internal properties
         self._rendered_frames = {}  # Cache for rendered frames
@@ -83,11 +86,11 @@ class TextCard(QObject):
         
         # Log resolution info on first frame
         if frame_number == 0:
-            logger.debug(f"Rendering text card at resolution: {width}x{height}")
+            logger.debug(f"Rendering text card at resolution: {width}x{height} with text size: {self.text_size}")
         
         # Get resolution-specific settings
         settings = self._get_resolution_settings(width, height)
-        font_scale = settings['font_scale']
+        font_scale = settings['font_scale'] * self.text_size  # Apply text size multiplier
         line_thickness = settings['thickness']
         line_spacing = settings['line_spacing']
         
@@ -212,7 +215,8 @@ class TextCard(QObject):
             "text_color": self.text_color,
             "duration_seconds": self.duration_seconds,
             "horizontal_align": self.horizontal_align,
-            "vertical_align": self.vertical_align
+            "vertical_align": self.vertical_align,
+            "text_size": self.text_size
         }
     
     @classmethod
@@ -225,4 +229,5 @@ class TextCard(QObject):
         card.duration_seconds = data.get("duration_seconds", 3)
         card.horizontal_align = data.get("horizontal_align", "center")
         card.vertical_align = data.get("vertical_align", "middle")
+        card.text_size = data.get("text_size", 1.0)
         return card 

@@ -534,23 +534,62 @@ class VideoControllerModel(QObject):
         self.undo_redo_manager.do_action(do_add_text_card, (do_add_text_card, undo_add_text_card))
 
     @Slot(int, int)
-    def remove_text_card(self, start_frame, end_frame):
-        """Remove a text card between the specified frames"""
-        def do_remove_text_card():
-            self.video_processor.remove_text_card(start_frame, end_frame)
-            logger.info(f"Removed text card: {start_frame}-{end_frame}")
+    def remove_text_card_and_close_gap(self, start_frame, end_frame):
+        """
+        Remove a text card and close the gap between adjacent clips.
+        
+        Args:
+            start_frame: The start frame of the text card
+            end_frame: The end frame of the text card
+        """
+        from screenvivid.utils.logging import logger
+        
+        logger.info(f"Removing text card and closing gap: {start_frame}-{end_frame}")
+        
+        # First find the text card
+        for i, card in enumerate(self.video_processor.text_cards):
+            if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
+                # Calculate gap size in frames
+                gap_size = end_frame - start_frame + 1
+                logger.info(f"Found text card with gap size of {gap_size} frames")
+                
+                # Save the card for undo
+                removed_card = dict(card)
+                self.video_processor._removed_text_cards.append(removed_card)
+                
+                # Define the undo/redo actions
+                def do_remove_card_and_close_gap():
+                    # 1. Remove the text card
+                    self.video_processor._text_cards.remove(card)
+                    self.textCardsChanged.emit()
+                    
+                    # 2. Close the gap in the clip track model (if available)
+                    if hasattr(self, 'clip_track_model') and self.clip_track_model:
+                        self.clip_track_model.close_gap_at_frame(start_frame, gap_size)
+                    
+                    logger.info(f"Text card removed and gap closed at {start_frame}")
+                
+                def undo_remove_card_and_close_gap():
+                    # 1. Create the gap again
+                    if hasattr(self, 'clip_track_model') and self.clip_track_model:
+                        self.clip_track_model.create_gap_at_frame(start_frame, gap_size)
+                    
+                    # 2. Add the text card back
+                    self.video_processor._text_cards.append(removed_card)
+                    self.video_processor._text_cards.sort(key=lambda x: x['start_frame'])
+                    self.textCardsChanged.emit()
+                    
+                    logger.info(f"Undid text card removal and restored gap at {start_frame}")
+                
+                # Execute the action
+                self.undo_redo_manager.do_action(do_remove_card_and_close_gap, 
+                                              (do_remove_card_and_close_gap, undo_remove_card_and_close_gap))
+                return True
+        
+        logger.warning(f"Could not find text card to remove: {start_frame}-{end_frame}")
+        return False
 
-        def undo_remove_text_card():
-            text_card = self.video_processor.get_removed_text_card(start_frame, end_frame)
-            if text_card:
-                self.video_processor.add_text_card(start_frame, end_frame, text_card['params'])
-                logger.info(f"Restored text card: {start_frame}-{end_frame}")
-            else:
-                logger.warning(f"Could not find removed text card: {start_frame}-{end_frame}")
-
-        self.undo_redo_manager.do_action(do_remove_text_card, (do_remove_text_card, undo_remove_text_card))
-
-    @Slot(int, int, int, int, dict)
+    @Slot(int, int, dict)
     def update_text_card(self, old_start_frame, old_end_frame, new_start_frame, new_end_frame, card_data):
         """Update an existing text card with new parameters"""
         def do_update_text_card():

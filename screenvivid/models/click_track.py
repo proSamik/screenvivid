@@ -244,6 +244,16 @@ class ClipTrackModel(QAbstractListModel):
         # Calculate gap width in pixels
         gap_width_pixels = frame_count * config.DEFAULT_PIXELS_PER_FRAME
         
+        # Handle special case for empty timeline or invalid frame
+        if not self._clips or len(self._clips) == 0:
+            logger.warning(f"No clips found in timeline, cannot create gap at frame {frame}")
+            return
+            
+        # If we only have one clip and it's empty, handle specially
+        if len(self._clips) == 1 and self._clips[0].width <= 0:
+            logger.info("Timeline has only one empty clip, cannot create gap")
+            return
+        
         # Find which clip contains this frame
         containing_clip_index = -1
         clip_internal_position = 0
@@ -252,14 +262,27 @@ class ClipTrackModel(QAbstractListModel):
             start_frame = int(clip.x / config.DEFAULT_PIXELS_PER_FRAME)
             end_frame = int((clip.x + clip.width) / config.DEFAULT_PIXELS_PER_FRAME)
             
-            if start_frame <= frame < end_frame:
+            # Special case: if the frame is exactly at the start of a clip
+            if frame == start_frame and i > 0:
+                # Create gap before this clip instead of splitting the previous one
+                logger.info(f"Frame {frame} is at the beginning of clip {i}, creating gap before it")
+                containing_clip_index = i - 1
+                clip_internal_position = int(self._clips[i-1].width / config.DEFAULT_PIXELS_PER_FRAME)
+                break
+            elif start_frame <= frame < end_frame:
                 containing_clip_index = i
                 clip_internal_position = frame - start_frame
                 break
         
         if containing_clip_index == -1:
             logger.warning(f"Could not find clip containing frame {frame}")
-            return
+            # Try to create gap at the end of the last clip
+            if frame >= int((self._clips[-1].x + self._clips[-1].width) / config.DEFAULT_PIXELS_PER_FRAME):
+                logger.info(f"Creating gap at the end of the last clip")
+                containing_clip_index = len(self._clips) - 1
+                clip_internal_position = int(self._clips[-1].width / config.DEFAULT_PIXELS_PER_FRAME)
+            else:
+                return
         
         logger.info(f"Frame {frame} is in clip {containing_clip_index} at position {clip_internal_position}")
         
@@ -321,3 +344,78 @@ class ClipTrackModel(QAbstractListModel):
             logger.info(f"Gap removal undone")
             
         self.undo_redo_manager.do_action(do_create_gap, (do_create_gap, undo_create_gap))
+
+    @Slot(int, int)
+    def close_gap_at_frame(self, frame, frame_count):
+        """
+        Close a gap at the specified frame by shifting all clips after that point.
+        This is the opposite operation of create_gap_at_frame.
+        
+        Args:
+            frame (int): The frame position where the gap starts
+            frame_count (int): The number of frames to close
+        """
+        from screenvivid.utils.logging import logger
+        
+        logger.info(f"Closing gap at frame {frame} with size of {frame_count} frames")
+        
+        # Calculate gap width in pixels
+        gap_width_pixels = frame_count * config.DEFAULT_PIXELS_PER_FRAME
+        
+        # Find which clip is right after the gap
+        right_clip_index = -1
+        
+        for i, clip in enumerate(self._clips):
+            start_frame = int(clip.x / config.DEFAULT_PIXELS_PER_FRAME)
+            
+            if start_frame >= frame + frame_count:
+                right_clip_index = i
+                break
+        
+        if right_clip_index == -1 or right_clip_index == 0:
+            logger.warning(f"Could not find clips to join at frame {frame}")
+            return
+        
+        # The left clip is the one before the right clip
+        left_clip_index = right_clip_index - 1
+        
+        logger.info(f"Found clips to join: {left_clip_index} and {right_clip_index}")
+        
+        def do_close_gap():
+            # Store the original position of the right clip
+            right_clip = self._clips[right_clip_index]
+            original_right_clip_x = right_clip.x
+            
+            # Shift the right clip to remove the gap
+            right_clip.x -= gap_width_pixels
+            
+            # Shift all subsequent clips
+            for i in range(right_clip_index + 1, len(self._clips)):
+                self._clips[i].x -= gap_width_pixels
+            
+            # Notify changes
+            self.dataChanged.emit(self.index(left_clip_index), self.index(self.rowCount()))
+            self.layoutChanged.emit()
+            self._notify_clip_positions()
+            self._update_undo_redo_signals()
+            
+            logger.info(f"Gap closed successfully")
+            
+        def undo_close_gap():
+            # Restore the original position of the right clip
+            right_clip = self._clips[right_clip_index]
+            right_clip.x += gap_width_pixels
+            
+            # Shift all subsequent clips back
+            for i in range(right_clip_index + 1, len(self._clips)):
+                self._clips[i].x += gap_width_pixels
+            
+            # Notify changes
+            self.dataChanged.emit(self.index(left_clip_index), self.index(self.rowCount()))
+            self.layoutChanged.emit()
+            self._notify_clip_positions()
+            self._update_undo_redo_signals()
+            
+            logger.info(f"Gap closure undone")
+        
+        self.undo_redo_manager.do_action(do_close_gap, (do_close_gap, undo_close_gap))

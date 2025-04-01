@@ -96,9 +96,10 @@ Rectangle {
                 // Auto-zoom toggle control
                 Rectangle {
                     id: autoZoomToggle
-                    anchors.right: parent.right
+                    anchors.left: textTrackHeader.right
+                    anchors.leftMargin: 10
                     anchors.top: parent.top
-                    anchors.margins: 5
+                    anchors.topMargin: 5
                     width: 90
                     height: 20
                     radius: 10
@@ -630,6 +631,7 @@ Rectangle {
                         property int relativeStartFrame: Math.max(0, card.start_frame - videoController.start_frame)
                         property int relativeEndFrame: Math.min(videoController.end_frame - videoController.start_frame, 
                                                             card.end_frame - videoController.start_frame)
+                        property real duration: (card.end_frame - card.start_frame + 1) / videoController.fps
                         
                         x: textTrackHeader.width + 10 + relativeStartFrame * studioWindow.pixelsPerFrame
                         y: 5
@@ -673,71 +675,114 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignVCenter
                             }
+                            
+                            Text {
+                                text: duration.toFixed(1) + "s"
+                                color: "white"
+                                font.pixelSize: 10
+                                font.bold: true
+                                visible: textCardRect.width > 70
+                                Layout.alignment: Qt.AlignVCenter
+                            }
                         }
                         
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: -15
-                            text: ((card.end_frame - card.start_frame) / videoController.fps).toFixed(1) + "s"
-                            color: "#CCCCCC"
-                            font.pixelSize: 10
-                            visible: textCardRect.width > 60
+                        // Make sure card is visible with its duration
+                        MouseArea {
+                            id: cardHoverArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton // Don't interfere with other mouse areas
+                        }
+                        
+                        // Tooltip showing duration
+                        ToolTip.visible: cardHoverArea.containsMouse
+                        ToolTip.text: formatDuration(duration) + " (" + card.start_frame + " to " + card.end_frame + ")"
+                        
+                        function formatDuration(seconds) {
+                            var mins = Math.floor(seconds / 60);
+                            var secs = Math.floor(seconds % 60);
+                            return mins + ":" + (secs < 10 ? "0" : "") + secs;
                         }
                         
                         MouseArea {
-                            id: cardMouseArea
                             anchors.fill: parent
-                            hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            acceptedButtons: Qt.LeftButton
                             
-                            onClicked: function(mouse) {
-                                if (mouse.button === Qt.LeftButton) {
-                                    videoController.jump_to_frame(card.start_frame)
-                                } else if (mouse.button === Qt.RightButton) {
-                                    cardContextMenu.x = mouse.x
-                                    cardContextMenu.y = mouse.y
-                                    cardContextMenu.open()
-                                }
+                            onClicked: {
+                                // Jump to the frame when clicked
+                                videoController.jump_to_frame(card.start_frame)
                             }
                             
-                            onDoubleClicked: function(mouse) {
-                                // Open editor in edit mode
-                                textCardEditor.isEditMode = true
-                                textCardEditor.startFrame = card.start_frame
-                                textCardEditor.endFrame = card.end_frame
-                                textCardEditor.setCardData(card.params)
-                                textCardEditor.visible = true
+                            onDoubleClicked: {
+                                // Edit the text card when double-clicked
+                                editTextCard(card.start_frame, card.end_frame, card.params)
                             }
                         }
                         
+                        // Context menu for right-click operations
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: textCardContextMenu.popup()
+                        }
+                        
                         Menu {
-                            id: cardContextMenu
+                            id: textCardContextMenu
                             
                             MenuItem {
-                                text: "Edit"
+                                text: "Edit Text Card"
+                                icon.source: "qrc:/resources/icons/edit.svg"
                                 onTriggered: {
-                                    textCardEditor.isEditMode = true
-                                    textCardEditor.startFrame = card.start_frame
-                                    textCardEditor.endFrame = card.end_frame
-                                    textCardEditor.setCardData(card.params)
-                                    textCardEditor.visible = true
+                                    editTextCard(card.start_frame, card.end_frame, card.params)
                                 }
                             }
                             
                             MenuItem {
-                                text: "Delete"
+                                text: "Delete Text Card"
+                                icon.source: "qrc:/resources/icons/trash.svg"
                                 onTriggered: {
-                                    videoController.remove_text_card(card.start_frame, card.end_frame)
+                                    // Delete the text card and close the gap
+                                    videoController.remove_text_card_and_close_gap(card.start_frame, card.end_frame)
                                 }
                             }
                             
                             MenuItem {
-                                text: "Preview"
+                                text: "Preview at This Position"
+                                icon.source: "qrc:/resources/icons/play.svg"
                                 onTriggered: {
                                     videoController.jump_to_frame(card.start_frame)
                                 }
                             }
+                        }
+                        
+                        // Function to edit text card
+                        function editTextCard(startFrame, endFrame, params) {
+                            var textCardEditor = getTextCardEditor();
+                            if (textCardEditor) {
+                                textCardEditor.isEditMode = true;
+                                textCardEditor.startFrame = startFrame;
+                                textCardEditor.endFrame = endFrame;
+                                textCardEditor.setCardData(params);
+                                textCardEditor.visible = true;
+                            }
+                        }
+                        
+                        // Function to get the text card editor instance
+                        function getTextCardEditor() {
+                            // Find the textCardEditor that was defined in ControlButtons.qml
+                            for (var i = 0; i < studioWindow.contentItem.children.length; i++) {
+                                var overlay = studioWindow.contentItem.children[i];
+                                if (overlay.objectName === "overlay") {
+                                    for (var j = 0; j < overlay.children.length; j++) {
+                                        var child = overlay.children[j];
+                                        if (child.objectName === "textCardEditor") {
+                                            return child;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // If not found, try to get it from the ControlButtons
+                            return textCardEditor;
                         }
                     }
                 }
