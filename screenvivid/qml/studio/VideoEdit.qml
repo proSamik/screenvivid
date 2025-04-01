@@ -807,8 +807,12 @@ Rectangle {
         z: 1000 // Make sure it appears above other elements
         
         onApplyCard: {
+            console.log("VideoEdit TextCardEditor - applyCard signal received")
             // Add text card to the video
             var cardData = textCardEditor.getCardData()
+            console.log("VideoEdit TextCardEditor - card data:", JSON.stringify(cardData))
+            console.log("VideoEdit TextCardEditor - frames:", textCardEditor.startFrame, textCardEditor.endFrame)
+            
             if (textCardEditor.isEditMode) {
                 videoController.update_text_card(
                     textCardEditor.startFrame, 
@@ -817,17 +821,20 @@ Rectangle {
                     textCardEditor.endFrame,
                     cardData
                 )
+                console.log("VideoEdit TextCardEditor - updated existing card")
             } else {
                 videoController.add_text_card(
                     textCardEditor.startFrame,
                     textCardEditor.endFrame,
                     cardData
                 )
+                console.log("VideoEdit TextCardEditor - added new card")
             }
             textCardEditor.visible = false
         }
         
         onCancelCard: {
+            console.log("VideoEdit TextCardEditor - cancelCard signal received")
             textCardEditor.visible = false
         }
     }
