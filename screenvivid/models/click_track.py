@@ -227,3 +227,97 @@ class ClipTrackModel(QAbstractListModel):
     def layoutChanged(self):
         super().layoutChanged.emit()
         self._notify_clip_positions()
+
+    @Slot(int, int)
+    def create_gap_at_frame(self, frame, frame_count):
+        """
+        Create a gap at the specified frame by shifting all clips after that point.
+        
+        Args:
+            frame (int): The frame position where to create the gap
+            frame_count (int): The number of frames for the gap
+        """
+        from screenvivid.utils.logging import logger
+        
+        logger.info(f"Creating gap at frame {frame} with duration of {frame_count} frames")
+        
+        # Calculate gap width in pixels
+        gap_width_pixels = frame_count * config.DEFAULT_PIXELS_PER_FRAME
+        
+        # Find which clip contains this frame
+        containing_clip_index = -1
+        clip_internal_position = 0
+        
+        for i, clip in enumerate(self._clips):
+            start_frame = int(clip.x / config.DEFAULT_PIXELS_PER_FRAME)
+            end_frame = int((clip.x + clip.width) / config.DEFAULT_PIXELS_PER_FRAME)
+            
+            if start_frame <= frame < end_frame:
+                containing_clip_index = i
+                clip_internal_position = frame - start_frame
+                break
+        
+        if containing_clip_index == -1:
+            logger.warning(f"Could not find clip containing frame {frame}")
+            return
+        
+        logger.info(f"Frame {frame} is in clip {containing_clip_index} at position {clip_internal_position}")
+        
+        # Calculate the position in pixels where to cut the clip
+        cut_position = clip_internal_position * config.DEFAULT_PIXELS_PER_FRAME
+        
+        def do_create_gap():
+            # First cut the clip at the specified position
+            containing_clip = self._clips[containing_clip_index]
+            
+            # Create a new clip that will be after the gap
+            new_clip = ClipTrack(
+                containing_clip.x + cut_position + gap_width_pixels,
+                containing_clip.width - cut_position,
+                int((containing_clip.width - cut_position) / config.DEFAULT_PIXELS_PER_FRAME)
+            )
+            
+            # Adjust the clip before the gap
+            containing_clip.width = cut_position
+            containing_clip.clip_len = int(cut_position / config.DEFAULT_PIXELS_PER_FRAME)
+            
+            # Insert the new clip after the current one
+            self._clips.insert(containing_clip_index + 1, new_clip)
+            
+            # Shift all subsequent clips
+            for i in range(containing_clip_index + 2, len(self._clips)):
+                self._clips[i].x += gap_width_pixels
+                
+            # Notify changes
+            self.dataChanged.emit(self.index(containing_clip_index), self.index(self.rowCount()))
+            self.layoutChanged.emit()
+            self._notify_clip_positions()
+            self._update_undo_redo_signals()
+            
+            logger.info(f"Gap created successfully: {frame_count} frames ({frame_count/self._video_fps:.2f} seconds)")
+            
+        def undo_create_gap():
+            # Merge the clips and remove the gap
+            containing_clip = self._clips[containing_clip_index]
+            next_clip = self._clips[containing_clip_index + 1]
+            
+            # Restore the original clip width
+            containing_clip.width += next_clip.width
+            containing_clip.clip_len = int(containing_clip.width / config.DEFAULT_PIXELS_PER_FRAME)
+            
+            # Remove the second part of the split clip
+            self._clips.pop(containing_clip_index + 1)
+            
+            # Shift all subsequent clips back
+            for i in range(containing_clip_index + 1, len(self._clips)):
+                self._clips[i].x -= gap_width_pixels
+            
+            # Notify changes
+            self.dataChanged.emit(self.index(containing_clip_index), self.index(self.rowCount()))
+            self.layoutChanged.emit()
+            self._notify_clip_positions()
+            self._update_undo_redo_signals()
+            
+            logger.info(f"Gap removal undone")
+            
+        self.undo_redo_manager.do_action(do_create_gap, (do_create_gap, undo_create_gap))
