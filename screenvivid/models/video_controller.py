@@ -13,6 +13,7 @@ from screenvivid.models.utils.manager.undo_redo import UndoRedoManager
 from screenvivid.models.export import ExportThread
 from screenvivid.utils.logging import logger
 from screenvivid.utils.general import safe_delete
+from screenvivid.models.text_card import TextCard
 
 class VideoControllerModel(QObject):
     frameReady = Signal()
@@ -37,6 +38,7 @@ class VideoControllerModel(QObject):
     zoomChanged = Signal()
     zoomEffectsChanged = Signal()
     cursorPositionReady = Signal(float, float)  # Signal for cursor position (normalized x, y)
+    textCardsChanged = Signal()  # New signal for text cards changes
 
     def __init__(self, frame_provider):
         super().__init__()
@@ -168,6 +170,10 @@ class VideoControllerModel(QObject):
     @Property(list, notify=zoomEffectsChanged)
     def zoom_effects(self):
         return self.video_processor.zoom_effects
+
+    @Property(list, notify=textCardsChanged)
+    def text_cards(self):
+        return self.video_processor.text_cards
 
     @Slot(int)
     def trim_left(self, start_frame):
@@ -339,7 +345,7 @@ class VideoControllerModel(QObject):
         # This returns the absolute frame number including the start_frame offset
         return self.video_processor.start_frame + self.video_processor.current_frame
 
-    @Slot(int, int, int, int, dict)
+    @Slot(int, int, dict)
     def update_zoom_effect(self, old_start_frame, old_end_frame, new_start_frame, new_end_frame, params):
         """Update an existing zoom effect with new parameters"""
         def do_update_zoom():
@@ -514,6 +520,93 @@ class VideoControllerModel(QObject):
             # Fallback to center position
             self.cursorPositionReady.emit(0.5, 0.5)
 
+    @Slot(int, int, dict)
+    def add_text_card(self, start_frame, end_frame, card_data):
+        """Add a text card between the specified frames"""
+        def do_add_text_card():
+            self.video_processor.add_text_card(start_frame, end_frame, card_data)
+
+        def undo_add_text_card():
+            self.video_processor.remove_text_card(start_frame, end_frame)
+
+        self.undo_redo_manager.do_action(do_add_text_card, (do_add_text_card, undo_add_text_card))
+        
+    @Slot(int, int)
+    def remove_text_card(self, start_frame, end_frame):
+        """Remove a text card between the specified frames"""
+        def do_remove_text_card():
+            self.video_processor.remove_text_card(start_frame, end_frame)
+
+        def undo_remove_text_card():
+            text_card = self.video_processor.get_removed_text_card(start_frame, end_frame)
+            if text_card:
+                self.video_processor.add_text_card(start_frame, end_frame, text_card['card_data'])
+
+        self.undo_redo_manager.do_action(do_remove_text_card, (do_remove_text_card, undo_remove_text_card))
+
+    @Slot(int, int, int, int, dict)
+    def update_text_card(self, old_start_frame, old_end_frame, new_start_frame, new_end_frame, card_data):
+        """Update an existing text card with new parameters"""
+        def do_update_text_card():
+            self.video_processor.update_text_card(old_start_frame, old_end_frame, new_start_frame, new_end_frame, card_data)
+
+        def undo_update_text_card():
+            # Get the old card that was replaced
+            old_card = self.video_processor.get_removed_text_card(old_start_frame, old_end_frame)
+            if old_card:
+                self.video_processor.update_text_card(new_start_frame, new_end_frame, old_start_frame, old_end_frame, old_card['card_data'])
+
+        self.undo_redo_manager.do_action(do_update_text_card, (do_update_text_card, undo_update_text_card))
+        
+    @Slot(int, result=dict)
+    def detect_cuts(self, margin_frames=5):
+        """
+        Detect cut points in the video and return frame ranges for potential text card insertion
+        
+        Args:
+            margin_frames: Number of frames to add as margin around cuts
+            
+        Returns:
+            Dictionary with lists of cut positions and their frame ranges
+        """
+        if not self.video_processor or not self.video_processor.video:
+            return {"cuts": []}
+            
+        cuts = []
+        
+        # Get cut positions from the clip track model
+        clips = self.video_processor._clip_positions
+        
+        if not clips or len(clips) <= 1:
+            return {"cuts": []}
+            
+        # Process each pair of adjacent clips
+        for i in range(len(clips) - 1):
+            current_clip_end = clips[i]["end_frame"]
+            next_clip_start = clips[i+1]["start_frame"]
+            
+            # If there's a gap between clips, it's a potential card insertion point
+            if next_clip_start > current_clip_end:
+                cut_info = {
+                    "position": i,
+                    "start_frame": current_clip_end + margin_frames,
+                    "end_frame": next_clip_start - margin_frames,
+                    "duration_frames": next_clip_start - current_clip_end - (2 * margin_frames)
+                }
+                cuts.append(cut_info)
+        
+        return {"cuts": cuts}
+        
+    @Slot(int, dict)
+    def add_text_card_at_cut(self, cut_position, card_data):
+        """Add a text card at a detected cut point"""
+        cuts = self.detect_cuts()["cuts"]
+        if 0 <= cut_position < len(cuts):
+            cut = cuts[cut_position]
+            self.add_text_card(cut["start_frame"], cut["end_frame"], card_data)
+            return True
+        return False
+
 class VideoLoadingError(Exception):
     pass
 
@@ -522,6 +615,7 @@ class VideoProcessor(QObject):
     playingChanged = Signal(bool)
     zoomChanged = Signal()
     zoomEffectsChanged = Signal()
+    textCardsChanged = Signal()  # New signal for text cards
 
     def __init__(self):
         super().__init__()
@@ -552,6 +646,11 @@ class VideoProcessor(QObject):
         # Zoom effects storage
         self._zoom_effects = []
         self._removed_zoom_effects = []
+
+        # Text cards storage
+        self._text_cards = []
+        self._removed_text_cards = []
+        self._clip_positions = []  # Store positions of clips for cut detection
 
     @property
     def aspect_ratio(self):
@@ -863,10 +962,43 @@ class VideoProcessor(QObject):
             current_absolute_frame = self.start_frame + self.current_frame
             logger.info(f"Processing frame {current_absolute_frame}")
             
-            # First apply standard transforms
+            # Check if there's an active text card for this frame
+            text_card_data = self.get_active_text_card(current_absolute_frame)
+            
+            # If we have a text card, render it instead of the video frame
+            if text_card_data:
+                logger.info(f"Rendering text card at frame {current_absolute_frame}")
+                
+                # Create a TextCard instance
+                card = TextCard(
+                    background_color=text_card_data.get("background_color", "black"),
+                    text=text_card_data.get("text", "Lorem ipsum dolor sit amet"),
+                    text_color=text_card_data.get("text_color", "white"),
+                    horizontal_align=text_card_data.get("horizontal_align", "center"),
+                    vertical_align=text_card_data.get("vertical_align", "middle")
+                )
+                
+                # Get the frame dimensions
+                height, width = frame.shape[:2]
+                
+                # Render the text card frame
+                frame_position = text_card_data.get("frame_position", 0)
+                total_frames = text_card_data.get("total_frames", 1)
+                
+                text_frame = card.render_frame(
+                    frame_position, 
+                    total_frames,
+                    width, 
+                    height
+                )
+                
+                # Convert to RGB and return
+                return cv2.cvtColor(text_frame, cv2.COLOR_BGR2RGB)
+            
+            # Otherwise, apply standard transforms
             result = self._transforms(input=frame, start_frame=current_absolute_frame)
             
-            # Get the active zoom effect for the current frame number (not the frame data)
+            # Get the active zoom effect for the current frame number
             zoom_effect = self.get_active_zoom_effect(current_absolute_frame)
             
             if zoom_effect is None:
@@ -1096,6 +1228,119 @@ class VideoProcessor(QObject):
         
         logger.warning(f"Could not find zoom effect to update: {old_start_frame}-{old_end_frame}")
         return False
+
+    @property
+    def text_cards(self):
+        return self._text_cards
+    
+    def set_clip_positions(self, positions):
+        """Set the clip positions for cut detection"""
+        self._clip_positions = positions
+    
+    def add_text_card(self, start_frame, end_frame, card_data):
+        """
+        Add a text card to the video
+        
+        Parameters:
+        - start_frame: Start frame for the text card
+        - end_frame: End frame for the text card
+        - card_data: Dictionary with text card parameters
+        """
+        text_card = {
+            'start_frame': start_frame,
+            'end_frame': end_frame,
+            'card_data': card_data
+        }
+        
+        # Check if this overlaps with an existing text card
+        for i, card in enumerate(self._text_cards):
+            if (start_frame <= card['end_frame'] and end_frame >= card['start_frame']):
+                # Overlapping card, replace it
+                self._text_cards[i] = text_card
+                self.textCardsChanged.emit()
+                return
+        
+        # Add new card
+        self._text_cards.append(text_card)
+        self._text_cards.sort(key=lambda x: x['start_frame'])
+        self.textCardsChanged.emit()
+    
+    def remove_text_card(self, start_frame, end_frame):
+        """Remove a text card that matches the given frame range"""
+        for i, card in enumerate(self._text_cards):
+            if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
+                removed = self._text_cards.pop(i)
+                self._removed_text_cards.append(removed)
+                self.textCardsChanged.emit()
+                return True
+        return False
+    
+    def get_removed_text_card(self, start_frame, end_frame):
+        """Get a previously removed text card for undo operations"""
+        for i, card in enumerate(self._removed_text_cards):
+            if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
+                return self._removed_text_cards.pop(i)
+        return None
+    
+    def update_text_card(self, old_start_frame, old_end_frame, new_start_frame, new_end_frame, card_data):
+        """Update an existing text card with new start/end frames and parameters"""
+        # Find the existing card
+        for i, card in enumerate(self._text_cards):
+            if card['start_frame'] == old_start_frame and card['end_frame'] == old_end_frame:
+                # Update with new values
+                updated_card = {
+                    'start_frame': new_start_frame,
+                    'end_frame': new_end_frame,
+                    'card_data': card_data
+                }
+                self._text_cards[i] = updated_card
+                self._text_cards.sort(key=lambda x: x['start_frame'])
+                self.textCardsChanged.emit()
+                logger.info(f"Updated text card: {old_start_frame}-{old_end_frame} → {new_start_frame}-{new_end_frame}")
+                return True
+        
+        logger.warning(f"Could not find text card to update: {old_start_frame}-{old_end_frame}")
+        return False
+        
+    def get_active_text_card(self, frame):
+        """
+        Get the active text card for the current frame, if any.
+        
+        Args:
+            frame: Absolute frame number (integer)
+            
+        Returns:
+            Dictionary with text card parameters or None if no active card
+        """
+        # Check if frame is an integer
+        if not isinstance(frame, (int, float)):
+            logger.error(f"Invalid frame type passed to get_active_text_card: {type(frame)}")
+            return None
+            
+        logger.info(f"Checking for text card at frame {frame}")
+        logger.info(f"Number of text cards: {len(self._text_cards)}")
+        
+        for i, card in enumerate(self._text_cards):
+            start = card['start_frame']
+            end = card['end_frame']
+            
+            if start <= frame <= end:
+                # Calculate how far we are through the card (0.0 to 1.0)
+                total_frames = end - start
+                progress = 0 if total_frames == 0 else (frame - start) / total_frames
+                
+                logger.info(f"Found active text card #{i} with progress {progress:.2f}")
+                
+                # Add progress to the card data for animation calculation
+                card_data = card['card_data'].copy()
+                card_data['start_frame'] = start
+                card_data['end_frame'] = end
+                card_data['progress'] = progress
+                card_data['frame_position'] = frame - start
+                card_data['total_frames'] = total_frames
+                return card_data
+        
+        return None
 
 class VideoThread(QThread):
     def __init__(self, video_processor):
