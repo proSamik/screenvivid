@@ -525,22 +525,28 @@ class VideoControllerModel(QObject):
         """Add a text card between the specified frames"""
         def do_add_text_card():
             self.video_processor.add_text_card(start_frame, end_frame, card_data)
+            logger.info(f"Added text card: {start_frame}-{end_frame}")
 
         def undo_add_text_card():
             self.video_processor.remove_text_card(start_frame, end_frame)
+            logger.info(f"Undid add text card: {start_frame}-{end_frame}")
 
         self.undo_redo_manager.do_action(do_add_text_card, (do_add_text_card, undo_add_text_card))
-        
+
     @Slot(int, int)
     def remove_text_card(self, start_frame, end_frame):
         """Remove a text card between the specified frames"""
         def do_remove_text_card():
             self.video_processor.remove_text_card(start_frame, end_frame)
+            logger.info(f"Removed text card: {start_frame}-{end_frame}")
 
         def undo_remove_text_card():
             text_card = self.video_processor.get_removed_text_card(start_frame, end_frame)
             if text_card:
-                self.video_processor.add_text_card(start_frame, end_frame, text_card['card_data'])
+                self.video_processor.add_text_card(start_frame, end_frame, text_card['params'])
+                logger.info(f"Restored text card: {start_frame}-{end_frame}")
+            else:
+                logger.warning(f"Could not find removed text card: {start_frame}-{end_frame}")
 
         self.undo_redo_manager.do_action(do_remove_text_card, (do_remove_text_card, undo_remove_text_card))
 
@@ -549,15 +555,19 @@ class VideoControllerModel(QObject):
         """Update an existing text card with new parameters"""
         def do_update_text_card():
             self.video_processor.update_text_card(old_start_frame, old_end_frame, new_start_frame, new_end_frame, card_data)
+            logger.info(f"Updated text card: {old_start_frame}-{old_end_frame} → {new_start_frame}-{new_end_frame}")
 
         def undo_update_text_card():
             # Get the old card that was replaced
             old_card = self.video_processor.get_removed_text_card(old_start_frame, old_end_frame)
             if old_card:
-                self.video_processor.update_text_card(new_start_frame, new_end_frame, old_start_frame, old_end_frame, old_card['card_data'])
+                self.video_processor.update_text_card(new_start_frame, new_end_frame, old_start_frame, old_end_frame, old_card['params'])
+                logger.info(f"Undid update of text card: {new_start_frame}-{new_end_frame} → {old_start_frame}-{old_end_frame}")
+            else:
+                logger.warning(f"Could not find old text card to restore: {old_start_frame}-{old_end_frame}")
 
         self.undo_redo_manager.do_action(do_update_text_card, (do_update_text_card, undo_update_text_card))
-        
+
     @Slot(int, result=dict)
     def detect_cuts(self, margin_frames=5):
         """
@@ -569,7 +579,10 @@ class VideoControllerModel(QObject):
         Returns:
             Dictionary with lists of cut positions and their frame ranges
         """
+        from screenvivid.utils.logging import logger
+        
         if not self.video_processor or not self.video_processor.video:
+            logger.warning("No video loaded, cannot detect cuts")
             return {"cuts": []}
             
         cuts = []
@@ -577,7 +590,10 @@ class VideoControllerModel(QObject):
         # Get cut positions from the clip track model
         clips = self.video_processor._clip_positions
         
+        logger.info(f"Detecting cuts from {len(clips)} clips")
+        
         if not clips or len(clips) <= 1:
+            logger.warning("No clips or only one clip found - no cuts to process")
             return {"cuts": []}
             
         # Process each pair of adjacent clips
@@ -585,18 +601,33 @@ class VideoControllerModel(QObject):
             current_clip_end = clips[i]["end_frame"]
             next_clip_start = clips[i+1]["start_frame"]
             
+            logger.info(f"Checking cut between clips {i} and {i+1}: " + 
+                     f"end={current_clip_end}, start={next_clip_start}")
+            
             # If there's a gap between clips, it's a potential card insertion point
             if next_clip_start > current_clip_end:
-                cut_info = {
-                    "position": i,
-                    "start_frame": current_clip_end + margin_frames,
-                    "end_frame": next_clip_start - margin_frames,
-                    "duration_frames": next_clip_start - current_clip_end - (2 * margin_frames)
-                }
-                cuts.append(cut_info)
-        
+                # Create a cut with margins
+                start_with_margin = current_clip_end + margin_frames
+                end_with_margin = next_clip_start - margin_frames
+                
+                # Ensure we have a valid range after applying margins
+                if end_with_margin > start_with_margin:
+                    cut_info = {
+                        "position": i,
+                        "start_frame": start_with_margin,
+                        "end_frame": end_with_margin,
+                        "duration_frames": end_with_margin - start_with_margin
+                    }
+                    cuts.append(cut_info)
+                    logger.info(f"Added cut: {cut_info}")
+                else:
+                    logger.warning(f"Cut between clips {i} and {i+1} too small after adding margins")
+            else:
+                logger.warning(f"No gap between clips {i} and {i+1}")
+                
+        logger.info(f"Found {len(cuts)} valid cuts")
         return {"cuts": cuts}
-        
+
     @Slot(int, dict)
     def add_text_card_at_cut(self, cut_position, card_data):
         """Add a text card at a detected cut point"""
@@ -1234,7 +1265,18 @@ class VideoProcessor(QObject):
         return self._text_cards
     
     def set_clip_positions(self, positions):
-        """Set the clip positions for cut detection"""
+        """
+        Set the clip positions for cut detection
+        
+        Args:
+            positions: List of dictionaries with start_frame and end_frame keys
+        """
+        from screenvivid.utils.logging import logger
+        
+        logger.info(f"Setting clip positions: {len(positions)} clips")
+        for i, pos in enumerate(positions):
+            logger.info(f"  Clip {i}: frames {pos['start_frame']} to {pos['end_frame']}")
+            
         self._clip_positions = positions
     
     def add_text_card(self, start_frame, end_frame, card_data):
@@ -1249,7 +1291,7 @@ class VideoProcessor(QObject):
         text_card = {
             'start_frame': start_frame,
             'end_frame': end_frame,
-            'card_data': card_data
+            'params': card_data  # Change 'card_data' to 'params' to match QML property expectations
         }
         
         # Check if this overlaps with an existing text card
@@ -1264,6 +1306,7 @@ class VideoProcessor(QObject):
         self._text_cards.append(text_card)
         self._text_cards.sort(key=lambda x: x['start_frame'])
         self.textCardsChanged.emit()
+        logger.info(f"Added text card: {start_frame}-{end_frame}, params: {card_data}")  # Add debugging info
     
     def remove_text_card(self, start_frame, end_frame):
         """Remove a text card that matches the given frame range"""
@@ -1287,11 +1330,15 @@ class VideoProcessor(QObject):
         # Find the existing card
         for i, card in enumerate(self._text_cards):
             if card['start_frame'] == old_start_frame and card['end_frame'] == old_end_frame:
+                # Save the old card for undo
+                old_card = dict(card)
+                self._removed_text_cards.append(old_card)
+                
                 # Update with new values
                 updated_card = {
                     'start_frame': new_start_frame,
                     'end_frame': new_end_frame,
-                    'card_data': card_data
+                    'params': card_data
                 }
                 self._text_cards[i] = updated_card
                 self._text_cards.sort(key=lambda x: x['start_frame'])
@@ -1332,7 +1379,7 @@ class VideoProcessor(QObject):
                 logger.info(f"Found active text card #{i} with progress {progress:.2f}")
                 
                 # Add progress to the card data for animation calculation
-                card_data = card['card_data'].copy()
+                card_data = card['params'].copy()
                 card_data['start_frame'] = start
                 card_data['end_frame'] = end
                 card_data['progress'] = progress
