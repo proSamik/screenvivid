@@ -299,30 +299,76 @@ Rectangle {
                 
                 // Duration control
                 Text {
-                    text: "Duration:"
+                    text: "Duration (sec):"
                     color: "white"
                 }
                 
                 RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
+                    spacing: 5
                     
                     SpinBox {
                         id: durationSpinBox
                         from: 1
-                        to: 20
+                        to: 10
+                        stepSize: 1
                         value: cardDuration
-                        onValueChanged: cardDuration = value
-                        editable: true
                         
-                        Layout.preferredWidth: 120
-                        Layout.alignment: Qt.AlignVCenter
+                        onValueChanged: {
+                            cardDuration = value;
+                            if (startFrame >= 0 && endFrame >= 0) {
+                                // Update the end frame based on duration
+                                var newEndFrame = startFrame + Math.round(value * videoController.fps) - 1;
+                                if (newEndFrame !== endFrame) {
+                                    endFrame = newEndFrame;
+                                    console.log("Updated end frame based on duration:", endFrame);
+                                }
+                            }
+                        }
+                        
+                        background: Rectangle {
+                            color: "#333333"
+                            border.color: "#555555"
+                            border.width: 1
+                            radius: 3
+                        }
+                        
+                        contentItem: TextInput {
+                            text: durationSpinBox.textFromValue(durationSpinBox.value, durationSpinBox.locale)
+                            color: "white"
+                            selectByMouse: true
+                            horizontalAlignment: Qt.AlignHCenter
+                            verticalAlignment: Qt.AlignVCenter
+                            readOnly: !durationSpinBox.editable
+                            validator: durationSpinBox.validator
+                            font: durationSpinBox.font
+                        }
                     }
                     
                     Text {
                         text: "seconds"
                         color: "white"
                     }
+                }
+                
+                // Show frame information
+                Text {
+                    text: "Position:"
+                    color: "white"
+                    visible: startFrame >= 0 && endFrame >= 0
+                }
+                
+                Text {
+                    function formatTime(frames) {
+                        var seconds = frames / videoController.fps;
+                        var mins = Math.floor(seconds / 60);
+                        var secs = Math.floor(seconds % 60);
+                        return mins + ":" + (secs < 10 ? "0" : "") + secs;
+                    }
+                    
+                    text: startFrame >= 0 && endFrame >= 0 ? 
+                          formatTime(startFrame) + " to " + formatTime(endFrame) : ""
+                    color: "#CCCCCC"
+                    visible: startFrame >= 0 && endFrame >= 0
                 }
             }
             
