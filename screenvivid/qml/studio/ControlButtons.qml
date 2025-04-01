@@ -175,18 +175,27 @@ Item {
                                 // Show the text card editor for current position
                                 console.log("Adding text card at current position: " + videoController.absolute_current_frame);
                                 textCardEditor.isEditMode = false;
-                                textCardEditor.startFrame = videoController.absolute_current_frame;
                                 
-                                // Calculate end frame (current frame plus 3 seconds worth of frames)
+                                // Default duration in seconds
                                 var defaultDuration = 3; // seconds
-                                var endFrame = videoController.absolute_current_frame + Math.round(defaultDuration * videoController.fps);
-                                textCardEditor.endFrame = endFrame; 
+                                var frameCount = Math.round(defaultDuration * videoController.fps);
+                                
+                                // Create a gap and place the text card in it
+                                var currentFrame = videoController.absolute_current_frame;
+                                
+                                // Create gap by shifting clips after the current position
+                                clipTrackModel.create_gap_at_frame(currentFrame, frameCount);
+                                
+                                // Set the text card start/end frames to fill the gap
+                                textCardEditor.startFrame = currentFrame;
+                                textCardEditor.endFrame = currentFrame + frameCount - 1;
                                 
                                 textCardEditor.text = "Lorem ipsum dolor sit amet";
                                 textCardEditor.visible = true;
                                 
                                 console.log("Text card editor opened with frames: " + 
-                                          textCardEditor.startFrame + " to " + textCardEditor.endFrame);
+                                          textCardEditor.startFrame + " to " + textCardEditor.endFrame + 
+                                          " (Duration: " + defaultDuration + " seconds)");
                             }
                         }
                         
@@ -200,36 +209,61 @@ Item {
                                 if (cuts.cuts && cuts.cuts.length > 0) {
                                     // Process cuts to ensure text cards are placed between clips
                                     var processedCuts = []
-                                    for (var i = 0; i < cuts.cuts.length; i++) {
-                                        var cut = cuts.cuts[i]
-                                        // Create a gap between clips for text card placement
-                                        // Ensure card starts right after previous clip ends
-                                        // and ends right before next clip starts
-                                        var textCardCut = {
-                                            start_frame: cut.end_frame + 1,
-                                            end_frame: (i < cuts.cuts.length - 1) ? 
-                                                      cuts.cuts[i+1].start_frame - 1 : 
-                                                      cut.end_frame + Math.round(3 * videoController.fps), // 3 sec default if last cut
-                                            duration_frames: 0 // Will be calculated below
-                                        }
-                                        // Calculate duration
-                                        textCardCut.duration_frames = textCardCut.end_frame - textCardCut.start_frame + 1
+                                    
+                                    // Function to create gaps at detected cuts
+                                    function createGapsAndShowDialog() {
+                                        console.log("Creating gaps for text cards at cuts");
                                         
-                                        // Only add if duration is sufficient (at least 1 second)
-                                        if (textCardCut.duration_frames >= videoController.fps) {
-                                            processedCuts.push(textCardCut)
-                                            console.log("Adding processed cut:", JSON.stringify(textCardCut))
+                                        // Process cuts in reverse order to avoid position shifting issues
+                                        var insertsToProcess = [];
+                                        
+                                        for (var i = cuts.cuts.length - 1; i >= 0; i--) {
+                                            var cut = cuts.cuts[i];
+                                            
+                                            // Default duration for text card in seconds
+                                            var cardDurationSec = 3;
+                                            var frameCount = Math.round(cardDurationSec * videoController.fps);
+                                            
+                                            // Store data for insertion
+                                            insertsToProcess.push({
+                                                position: cut.end_frame,
+                                                frames: frameCount,
+                                                index: i
+                                            });
+                                        }
+                                        
+                                        // Insert gaps in reverse order (to avoid position shifting)
+                                        for (var j = 0; j < insertsToProcess.length; j++) {
+                                            var insert = insertsToProcess[j];
+                                            
+                                            // Create gap after the cut
+                                            clipTrackModel.create_gap_at_frame(insert.position, insert.frames);
+                                            
+                                            // Update processed cuts with the new gap info
+                                            var textCardCut = {
+                                                start_frame: insert.position + 1,
+                                                end_frame: insert.position + insert.frames,
+                                                duration_frames: insert.frames,
+                                                duration_seconds: insert.frames / videoController.fps
+                                            };
+                                            
+                                            processedCuts.unshift(textCardCut); // Add to beginning since we're processing in reverse
+                                            console.log("Added gap for text card:", JSON.stringify(textCardCut));
+                                        }
+                                        
+                                        // Show dialog with processed cuts
+                                        if (processedCuts.length > 0) {
+                                            detectCutsDialog.cuts = processedCuts;
+                                            detectCutsDialog.visible = true;
+                                        } else {
+                                            noDetectedCutsDialog.open();
                                         }
                                     }
                                     
-                                    if (processedCuts.length > 0) {
-                                        detectCutsDialog.cuts = processedCuts
-                                        detectCutsDialog.visible = true
-                                    } else {
-                                        noDetectedCutsDialog.open()
-                                    }
+                                    // Create gaps and show dialog
+                                    createGapsAndShowDialog();
                                 } else {
-                                    noDetectedCutsDialog.open()
+                                    noDetectedCutsDialog.open();
                                 }
                             }
                         }
@@ -363,9 +397,10 @@ Item {
                                 // Calculate time in seconds from frames
                                 property real startTime: modelData.start_frame / videoController.fps
                                 property real endTime: modelData.end_frame / videoController.fps
-                                property real duration: modelData.duration_frames / videoController.fps
+                                property real duration: modelData.duration_seconds || 
+                                                       (modelData.duration_frames / videoController.fps)
                                 
-                                text: "Between: " + formatTime(startTime) + " - " + formatTime(endTime) + 
+                                text: "Gap: " + formatTime(startTime) + " - " + formatTime(endTime) + 
                                       " (Duration: " + duration.toFixed(1) + "s)"
                                 color: "#CCCCCC"
                                 font.pixelSize: 12
@@ -535,7 +570,7 @@ Item {
                                 "background_color": detectCutsDialog.backgroundColor,
                                 "text": detectCutsDialog.defaultText,
                                 "text_color": detectCutsDialog.textColor,
-                                "duration_seconds": cutData.duration_frames / videoController.fps,
+                                "duration_seconds": cutData.duration_seconds,
                                 "horizontal_align": "center",
                                 "vertical_align": "middle"
                             }
