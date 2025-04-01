@@ -135,12 +135,15 @@ Item {
             RowLayout {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 5
+                anchors.leftMargin: 10
+                spacing: 10
                 
                 ToolButton {
                     id: cutButton
                     icon.source: "qrc:/resources/icons/cut.svg"
                     icon.color: "#e8eaed"
+                    icon.width: 22
+                    icon.height: 22
                     onClicked: clipTrackModel.cut_clip()
                     
                     ToolTip.text: "Cut Clip"
@@ -152,6 +155,8 @@ Item {
                     id: textCardButton
                     icon.source: "qrc:/resources/icons/text_card.svg"
                     icon.color: "#e8eaed"
+                    icon.width: 22
+                    icon.height: 22
                     onClicked: {
                         textCardMenu.open()
                     }
@@ -168,10 +173,20 @@ Item {
                             text: "Add Text Card at Current Position"
                             onTriggered: {
                                 // Show the text card editor for current position
-                                textCardEditor.isEditMode = false
-                                textCardEditor.startFrame = videoController.absolute_current_frame
-                                textCardEditor.endFrame = videoController.absolute_current_frame + Math.round(3 * videoController.fps) // 3 seconds default
-                                textCardEditor.visible = true
+                                console.log("Adding text card at current position: " + videoController.absolute_current_frame);
+                                textCardEditor.isEditMode = false;
+                                textCardEditor.startFrame = videoController.absolute_current_frame;
+                                
+                                // Calculate end frame (current frame plus 3 seconds worth of frames)
+                                var defaultDuration = 3; // seconds
+                                var endFrame = videoController.absolute_current_frame + Math.round(defaultDuration * videoController.fps);
+                                textCardEditor.endFrame = endFrame; 
+                                
+                                textCardEditor.text = "Lorem ipsum dolor sit amet";
+                                textCardEditor.visible = true;
+                                
+                                console.log("Text card editor opened with frames: " + 
+                                          textCardEditor.startFrame + " to " + textCardEditor.endFrame);
                             }
                         }
                         
@@ -194,18 +209,31 @@ Item {
         }
     }
 
-    // Text card editor panel
+    // Text card editor panel - using Overlay system for proper stacking
+    Component.onCompleted: {
+        // Parent the dialogs to the application Overlay
+        textCardEditor.parent = Overlay.overlay
+        detectCutsDialog.parent = Overlay.overlay
+        noDetectedCutsDialog.parent = Overlay.overlay
+        
+        console.log("Dialogs reparented to application Overlay for proper stacking");
+    }
+    
     TextCardEditor {
         id: textCardEditor
         visible: false
         width: 400
         height: 450
-        anchors.centerIn: parent
-        z: 1000 // Make sure it appears above other elements
+        anchors.centerIn: Overlay.overlay
+        // z-index is handled by Overlay
         
         onApplyCard: {
+            console.log("TextCardEditor - applyCard signal received")
             // Add text card to the video
             var cardData = textCardEditor.getCardData()
+            console.log("TextCardEditor - card data:", JSON.stringify(cardData))
+            console.log("TextCardEditor - frames:", textCardEditor.startFrame, textCardEditor.endFrame)
+            
             if (textCardEditor.isEditMode) {
                 videoController.update_text_card(
                     textCardEditor.startFrame, 
@@ -214,17 +242,20 @@ Item {
                     textCardEditor.endFrame,
                     cardData
                 )
+                console.log("TextCardEditor - updated existing card")
             } else {
                 videoController.add_text_card(
                     textCardEditor.startFrame,
                     textCardEditor.endFrame,
                     cardData
                 )
+                console.log("TextCardEditor - added new card")
             }
             textCardEditor.visible = false
         }
         
         onCancelCard: {
+            console.log("TextCardEditor - cancelCard signal received")
             textCardEditor.visible = false
         }
     }
@@ -235,7 +266,7 @@ Item {
         title: "Add Text Cards at Cuts"
         width: 500
         height: 400
-        anchors.centerIn: parent
+        anchors.centerIn: Overlay.overlay
         modal: true
         
         property var cuts: []
@@ -492,7 +523,7 @@ Item {
         title: "No Cuts Detected"
         width: 400
         height: 200
-        anchors.centerIn: parent
+        anchors.centerIn: Overlay.overlay
         modal: true
         
         contentItem: ColumnLayout {
