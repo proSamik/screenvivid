@@ -32,10 +32,36 @@ class TextCard(QObject):
         
         # Internal properties
         self._rendered_frames = {}  # Cache for rendered frames
-        self._font = cv2.FONT_HERSHEY_SIMPLEX
-        self._font_scale = 1.0
-        self._line_thickness = 2
-        self._padding = 50  # Padding from edges
+        self._font = cv2.FONT_HERSHEY_DUPLEX  # Better font for 4K
+        self._padding_percent = 0.05  # Padding as percent of frame dimensions
+        
+        # Dynamic settings that scale with resolution
+        self._dynamic_settings = {
+            'HD': {
+                'font_scale': 1.0,
+                'thickness': 2,
+                'line_spacing': 1.5
+            },
+            '4K': {
+                'font_scale': 2.0,
+                'thickness': 3,
+                'line_spacing': 1.8
+            },
+            '8K': {
+                'font_scale': 4.0,
+                'thickness': 5,
+                'line_spacing': 2.0
+            }
+        }
+        
+    def _get_resolution_settings(self, width, height):
+        """Get the appropriate font settings based on resolution"""
+        if width >= 7680 or height >= 4320:  # 8K
+            return self._dynamic_settings['8K']
+        elif width >= 3840 or height >= 2160:  # 4K
+            return self._dynamic_settings['4K']
+        else:  # HD or lower
+            return self._dynamic_settings['HD']
         
     def render_frame(self, frame_number, total_frames, width, height):
         """
@@ -54,6 +80,20 @@ class TextCard(QObject):
         cache_key = f"{frame_number}_{width}_{height}"
         if cache_key in self._rendered_frames:
             return self._rendered_frames[cache_key]
+        
+        # Log resolution info on first frame
+        if frame_number == 0:
+            logger.debug(f"Rendering text card at resolution: {width}x{height}")
+        
+        # Get resolution-specific settings
+        settings = self._get_resolution_settings(width, height)
+        font_scale = settings['font_scale']
+        line_thickness = settings['thickness']
+        line_spacing = settings['line_spacing']
+        
+        # Calculate padding based on frame dimensions
+        padding_x = int(width * self._padding_percent)
+        padding_y = int(height * self._padding_percent)
         
         # Create background
         if self.background_color == "black":
@@ -89,33 +129,46 @@ class TextCard(QObject):
         
         for line in lines:
             (text_width, text_height), _ = cv2.getTextSize(
-                line, self._font, self._font_scale, self._line_thickness
+                line, self._font, font_scale, line_thickness
             )
             line_height = max(line_height, text_height)
             line_widths.append(text_width)
         
         # Calculate vertical position
         if self.vertical_align == "top":
-            y_pos = self._padding
+            y_pos = padding_y
         elif self.vertical_align == "bottom":
-            y_pos = height - (line_height * len(lines)) - self._padding
+            y_pos = height - (line_height * len(lines) * line_spacing) - padding_y
         else:  # middle
-            y_pos = (height - (line_height * len(lines))) // 2
+            y_pos = (height - (line_height * len(lines) * line_spacing)) // 2
         
-        # Add text line by line
+        # Add text line by line with antialiasing for higher quality
         for i, line in enumerate(lines):
             # Calculate horizontal position for this line
             if self.horizontal_align == "left":
-                x_pos = self._padding
+                x_pos = padding_x
             elif self.horizontal_align == "right":
-                x_pos = width - line_widths[i] - self._padding
+                x_pos = width - line_widths[i] - padding_x
             else:  # center
                 x_pos = (width - line_widths[i]) // 2
             
+            # For large text in 4K+, use filled text with outline for better quality
+            if width >= 3840 or height >= 2160:
+                # Draw text outline for better visibility
+                outline_color = (0, 0, 0) if self.text_color == "white" else (255, 255, 255)
+                for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                    cv2.putText(
+                        frame, line, 
+                        (x_pos + dx, int(y_pos + (i * line_height * line_spacing)) + dy),
+                        self._font, font_scale, outline_color, line_thickness + 1, 
+                        cv2.LINE_AA
+                    )
+            
             # Add the line to the frame
             cv2.putText(
-                frame, line, (x_pos, y_pos + (i * int(line_height * 1.5))),
-                self._font, self._font_scale, text_color, self._line_thickness, 
+                frame, line, 
+                (x_pos, int(y_pos + (i * line_height * line_spacing))),
+                self._font, font_scale, text_color, line_thickness, 
                 cv2.LINE_AA
             )
         
@@ -126,22 +179,25 @@ class TextCard(QObject):
             
             # Position for cursor
             if self.horizontal_align == "left":
-                cursor_x = self._padding + last_line_width + 5
+                cursor_x = padding_x + last_line_width + 5
             elif self.horizontal_align == "right":
-                cursor_x = width - self._padding - 5
+                cursor_x = width - padding_x - 5
             else:  # center
                 cursor_x = (width - line_widths[-1]) // 2 + last_line_width + 5
             
-            cursor_y = y_pos + ((len(lines) - 1) * int(line_height * 1.5))
+            cursor_y = int(y_pos + ((len(lines) - 1) * line_height * line_spacing))
             
             # Draw cursor (blink every 15 frames)
             if frame_number % 30 < 15:
+                cursor_height = line_height
+                cursor_width = max(2, line_thickness)
+                
                 cv2.line(
                     frame, 
                     (cursor_x, cursor_y), 
-                    (cursor_x, cursor_y - line_height), 
+                    (cursor_x, cursor_y - cursor_height), 
                     text_color, 
-                    self._line_thickness
+                    cursor_width
                 )
         
         # Cache and return
