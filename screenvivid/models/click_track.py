@@ -1,7 +1,6 @@
-
 from PySide6.QtCore import (
     Qt, Property, Slot, Signal, QAbstractListModel,
-    QModelIndex
+    QModelIndex, QObject
 )
 from screenvivid import config
 from screenvivid.models.utils.manager.undo_redo import UndoRedoManager
@@ -28,6 +27,15 @@ class ClipTrackModel(QAbstractListModel):
         self._clicked_events = []
         self._video_fps = config.DEFAULT_FPS
         self.undo_redo_manager = UndoRedoManager()
+        self._video_controller = None
+
+    @Property(QObject)
+    def videoController(self):
+        return self._video_controller
+
+    @videoController.setter
+    def videoController(self, controller):
+        self._video_controller = controller
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._clips)
@@ -152,6 +160,7 @@ class ClipTrackModel(QAbstractListModel):
             self._clips[index].width = length * self._video_fps * config.DEFAULT_PIXELS_PER_FRAME
             self._clips[index].clip_len = length
             self.widthChanged.emit()
+            self._notify_clip_positions()
 
     @Slot(int, float)
     def set_cut_clip_data(self, index, x):
@@ -160,3 +169,32 @@ class ClipTrackModel(QAbstractListModel):
     @Slot()
     def reset_cut_clip_data(self):
         self._clicked_events = []
+
+    @Slot()
+    def _notify_clip_positions(self):
+        """Notify the VideoController about the current clip positions for cut detection"""
+        from screenvivid.utils.logging import logger
+        
+        # Use the saved video_controller property
+        if self._video_controller and hasattr(self._video_controller, 'video_processor'):
+            try:
+                # Convert clips to a format that VideoController can use
+                clip_positions = []
+                for clip in self._clips:
+                    pos = {
+                        "start_frame": int(clip.x / config.DEFAULT_PIXELS_PER_FRAME),
+                        "end_frame": int((clip.x + clip.width) / config.DEFAULT_PIXELS_PER_FRAME)
+                    }
+                    clip_positions.append(pos)
+                
+                # Update the VideoController with clip positions
+                self._video_controller.video_processor.set_clip_positions(clip_positions)
+            except Exception as e:
+                logger.warning(f"Error processing clip positions: {e}")
+        else:
+            logger.warning("VideoController not accessible from ClipTrackModel")
+
+    # Notify on model changes
+    def layoutChanged(self):
+        super().layoutChanged.emit()
+        self._notify_clip_positions()

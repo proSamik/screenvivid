@@ -40,6 +40,10 @@ def main():
     studio_path = qml_base_path / "studio"
     engine.addImportPath(str(studio_path))
     logger.debug(f"Added QML import path: {studio_path}")
+    
+    # Make sure studio components can be found
+    engine.addImportPath("qrc:/qml")
+    logger.debug("Added QML import path for qrc resources")
 
     # Image provider
     frame_provider = FrameImageProvider()
@@ -53,6 +57,9 @@ def main():
     video_controller = VideoControllerModel(frame_provider=frame_provider)
     screen_recorder = ScreenRecorderModel()
     logger_model = LoggerModel()
+    
+    # Connect models
+    clip_track_model.videoController = video_controller
 
     engine.rootContext().setContextProperty("clipTrackModel", clip_track_model)
     engine.rootContext().setContextProperty("windowController", window_controller)
