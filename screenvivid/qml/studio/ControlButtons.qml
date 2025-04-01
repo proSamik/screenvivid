@@ -195,9 +195,39 @@ Item {
                             onTriggered: {
                                 // Detect cuts and show dialog to add cards at cuts
                                 var cuts = videoController.detect_cuts(5)
+                                console.log("Detected cuts:", JSON.stringify(cuts))
+                                
                                 if (cuts.cuts && cuts.cuts.length > 0) {
-                                    detectCutsDialog.cuts = cuts.cuts
-                                    detectCutsDialog.visible = true
+                                    // Process cuts to ensure text cards are placed between clips
+                                    var processedCuts = []
+                                    for (var i = 0; i < cuts.cuts.length; i++) {
+                                        var cut = cuts.cuts[i]
+                                        // Create a gap between clips for text card placement
+                                        // Ensure card starts right after previous clip ends
+                                        // and ends right before next clip starts
+                                        var textCardCut = {
+                                            start_frame: cut.end_frame + 1,
+                                            end_frame: (i < cuts.cuts.length - 1) ? 
+                                                      cuts.cuts[i+1].start_frame - 1 : 
+                                                      cut.end_frame + Math.round(3 * videoController.fps), // 3 sec default if last cut
+                                            duration_frames: 0 // Will be calculated below
+                                        }
+                                        // Calculate duration
+                                        textCardCut.duration_frames = textCardCut.end_frame - textCardCut.start_frame + 1
+                                        
+                                        // Only add if duration is sufficient (at least 1 second)
+                                        if (textCardCut.duration_frames >= videoController.fps) {
+                                            processedCuts.push(textCardCut)
+                                            console.log("Adding processed cut:", JSON.stringify(textCardCut))
+                                        }
+                                    }
+                                    
+                                    if (processedCuts.length > 0) {
+                                        detectCutsDialog.cuts = processedCuts
+                                        detectCutsDialog.visible = true
+                                    } else {
+                                        noDetectedCutsDialog.open()
+                                    }
                                 } else {
                                     noDetectedCutsDialog.open()
                                 }
