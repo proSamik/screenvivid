@@ -1,6 +1,8 @@
-import QtQuick 6.7
-import QtQuick.Layouts 6.7
-import QtQuick.Controls 6.7
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls
+// Import components directly 
+import "." // Import local directory components
 
 ColumnLayout {
     Layout.fillWidth: true

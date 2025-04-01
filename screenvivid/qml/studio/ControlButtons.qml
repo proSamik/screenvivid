@@ -1,7 +1,8 @@
-import QtQuick 6.7
-import QtQuick.Controls 6.7
-import QtQuick.Layouts 6.7
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
 import "../components"
+import "."
 
 Item {
     Layout.fillWidth: true
@@ -131,12 +132,390 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            ToolButton {
+            RowLayout {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                icon.source: "qrc:/resources/icons/cut.svg"
-                icon.color: "#e8eaed"
-                onClicked: clipTrackModel.cut_clip()
+                spacing: 5
+                
+                ToolButton {
+                    id: cutButton
+                    icon.source: "qrc:/resources/icons/cut.svg"
+                    icon.color: "#e8eaed"
+                    onClicked: clipTrackModel.cut_clip()
+                    
+                    ToolTip.text: "Cut Clip"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                }
+                
+                ToolButton {
+                    id: textCardButton
+                    icon.source: "qrc:/resources/icons/text_card.svg"
+                    icon.color: "#e8eaed"
+                    onClicked: {
+                        textCardMenu.open()
+                    }
+                    
+                    ToolTip.text: "Add Text Card"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                    
+                    Menu {
+                        id: textCardMenu
+                        y: textCardButton.height
+                        
+                        MenuItem {
+                            text: "Add Text Card at Current Position"
+                            onTriggered: {
+                                // Show the text card editor for current position
+                                textCardEditor.isEditMode = false
+                                textCardEditor.startFrame = videoController.absolute_current_frame
+                                textCardEditor.endFrame = videoController.absolute_current_frame + Math.round(3 * videoController.fps) // 3 seconds default
+                                textCardEditor.visible = true
+                            }
+                        }
+                        
+                        MenuItem {
+                            text: "Auto-detect Cuts and Add Cards"
+                            onTriggered: {
+                                // Detect cuts and show dialog to add cards at cuts
+                                var cuts = videoController.detect_cuts(5)
+                                if (cuts.cuts && cuts.cuts.length > 0) {
+                                    detectCutsDialog.cuts = cuts.cuts
+                                    detectCutsDialog.visible = true
+                                } else {
+                                    noDetectedCutsDialog.open()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Text card editor panel
+    TextCardEditor {
+        id: textCardEditor
+        visible: false
+        width: 400
+        height: 450
+        anchors.centerIn: parent
+        z: 1000 // Make sure it appears above other elements
+        
+        onApplyCard: {
+            // Add text card to the video
+            var cardData = textCardEditor.getCardData()
+            if (textCardEditor.isEditMode) {
+                videoController.update_text_card(
+                    textCardEditor.startFrame, 
+                    textCardEditor.endFrame,
+                    textCardEditor.startFrame, // Keep same positions
+                    textCardEditor.endFrame,
+                    cardData
+                )
+            } else {
+                videoController.add_text_card(
+                    textCardEditor.startFrame,
+                    textCardEditor.endFrame,
+                    cardData
+                )
+            }
+            textCardEditor.visible = false
+        }
+        
+        onCancelCard: {
+            textCardEditor.visible = false
+        }
+    }
+    
+    // Dialog for auto-detected cuts
+    Dialog {
+        id: detectCutsDialog
+        title: "Add Text Cards at Cuts"
+        width: 500
+        height: 400
+        anchors.centerIn: parent
+        modal: true
+        
+        property var cuts: []
+        property string defaultText: "Lorem ipsum dolor sit amet"
+        property string backgroundColor: "black"
+        property string textColor: "white"
+        
+        header: Rectangle {
+            width: parent.width
+            height: 50
+            color: "#333333"
+            
+            Text {
+                anchors.centerIn: parent
+                text: "Detected Cut Points"
+                color: "white"
+                font.pixelSize: 16
+                font.bold: true
+            }
+        }
+        
+        contentItem: ColumnLayout {
+            spacing: 10
+            
+            Text {
+                text: "The following cut points were detected. Select which ones to add text cards to:"
+                color: "white"
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            
+            ListView {
+                id: cutsListView
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: detectCutsDialog.cuts
+                
+                delegate: Rectangle {
+                    width: cutsListView.width
+                    height: 60
+                    color: index % 2 === 0 ? "#2A2A2A" : "#333333"
+                    
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 10
+                        
+                        CheckBox {
+                            id: cutCheckbox
+                            checked: true
+                        }
+                        
+                        Column {
+                            Layout.fillWidth: true
+                            
+                            Text {
+                                text: "Cut #" + (index + 1)
+                                color: "white"
+                                font.bold: true
+                            }
+                            
+                            Text {
+                                // Calculate time in seconds from frames
+                                property real startTime: modelData.start_frame / videoController.fps
+                                property real endTime: modelData.end_frame / videoController.fps
+                                property real duration: modelData.duration_frames / videoController.fps
+                                
+                                text: "Between: " + formatTime(startTime) + " - " + formatTime(endTime) + 
+                                      " (Duration: " + duration.toFixed(1) + "s)"
+                                color: "#CCCCCC"
+                                font.pixelSize: 12
+                                
+                                function formatTime(seconds) {
+                                    var mins = Math.floor(seconds / 60)
+                                    var secs = Math.floor(seconds % 60)
+                                    return mins + ":" + (secs < 10 ? "0" : "") + secs
+                                }
+                            }
+                        }
+                        
+                        Button {
+                            text: "Preview"
+                            onClicked: {
+                                videoController.jump_to_frame(modelData.start_frame)
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Common text settings
+            GroupBox {
+                title: "Text Card Settings"
+                Layout.fillWidth: true
+                
+                background: Rectangle {
+                    color: "#2A2A2A"
+                    border.color: "#555555"
+                    border.width: 1
+                    radius: 5
+                }
+                
+                ColumnLayout {
+                    anchors.fill: parent
+                    
+                    RowLayout {
+                        Layout.fillWidth: true
+                        
+                        Text {
+                            text: "Default Text:"
+                            color: "white"
+                        }
+                        
+                        TextField {
+                            id: defaultTextField
+                            Layout.fillWidth: true
+                            text: detectCutsDialog.defaultText
+                            onTextChanged: {
+                                detectCutsDialog.defaultText = text
+                            }
+                        }
+                    }
+                    
+                    RowLayout {
+                        Layout.fillWidth: true
+                        
+                        Text {
+                            text: "Background:"
+                            color: "white"
+                        }
+                        
+                        RowLayout {
+                            spacing: 10
+                            
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                color: "black"
+                                border.width: detectCutsDialog.backgroundColor === "black" ? 2 : 0
+                                border.color: "#7BD57F"
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        detectCutsDialog.backgroundColor = "black"
+                                    }
+                                }
+                            }
+                            
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                color: "white"
+                                border.width: detectCutsDialog.backgroundColor === "white" ? 2 : 0
+                                border.color: "#7BD57F"
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        detectCutsDialog.backgroundColor = "white"
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Text {
+                            text: "Text Color:"
+                            color: "white"
+                        }
+                        
+                        RowLayout {
+                            spacing: 10
+                            
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                color: "white"
+                                border.width: detectCutsDialog.textColor === "white" ? 2 : 0
+                                border.color: "#7BD57F"
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        detectCutsDialog.textColor = "white"
+                                    }
+                                }
+                            }
+                            
+                            Rectangle {
+                                width: 20
+                                height: 20
+                                color: "black"
+                                border.width: detectCutsDialog.textColor === "black" ? 2 : 0
+                                border.color: "#7BD57F"
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        detectCutsDialog.textColor = "black"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        footer: DialogButtonBox {
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            
+            Button {
+                text: "Apply to Selected"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                highlighted: true
+            }
+            
+            onRejected: {
+                detectCutsDialog.close()
+            }
+            
+            onAccepted: {
+                // Apply text cards to all selected cuts
+                for (var i = 0; i < cutsListView.count; i++) {
+                    var item = cutsListView.itemAtIndex(i)
+                    if (item.children[0].children[0].checked) {
+                        var cutData = detectCutsDialog.cuts[i]
+                        videoController.add_text_card(
+                            cutData.start_frame,
+                            cutData.end_frame,
+                            {
+                                "background_color": detectCutsDialog.backgroundColor,
+                                "text": detectCutsDialog.defaultText,
+                                "text_color": detectCutsDialog.textColor,
+                                "duration_seconds": cutData.duration_frames / videoController.fps,
+                                "horizontal_align": "center",
+                                "vertical_align": "middle"
+                            }
+                        )
+                    }
+                }
+                detectCutsDialog.close()
+            }
+        }
+    }
+    
+    // Dialog for when no cuts are detected
+    Dialog {
+        id: noDetectedCutsDialog
+        title: "No Cuts Detected"
+        width: 400
+        height: 200
+        anchors.centerIn: parent
+        modal: true
+        
+        contentItem: ColumnLayout {
+            spacing: 20
+            
+            Text {
+                text: "No cut points were detected in the video.\n\nTo add text cards, please first cut your video using the scissor tool, or manually add a text card at the current position."
+                color: "white"
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+        
+        footer: DialogButtonBox {
+            Button {
+                text: "OK"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                highlighted: true
+            }
+            
+            onAccepted: {
+                noDetectedCutsDialog.close()
             }
         }
     }

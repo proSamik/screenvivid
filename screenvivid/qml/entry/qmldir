@@ -1,0 +1,4 @@
+module Entry
+
+# Main entry point
+Entry 1.0 main.qml 

@@ -33,5 +33,12 @@
         <file>../resources/icons/full_screen.svg</file>
         <file>../resources/icons/exit_full_screen.svg</file>
         <file>../resources/icons/screenvivid.svg</file>
+        <file>../resources/icons/text_card.svg</file>
+        <file>../resources/icons/align_left.svg</file>
+        <file>../resources/icons/align_center.svg</file>
+        <file>../resources/icons/align_right.svg</file>
+        <file>../resources/icons/align_top.svg</file>
+        <file>../resources/icons/align_middle.svg</file>
+        <file>../resources/icons/align_bottom.svg</file>
     </qresource>
 </RCC>

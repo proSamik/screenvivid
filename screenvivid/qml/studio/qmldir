@@ -1,0 +1,14 @@
+module Studio
+
+# Main components
+Studio 1.0 Studio.qml
+MainContent 1.0 MainContent.qml
+VideoEdit 1.0 VideoEdit.qml
+VideoPreview 1.0 VideoPreview.qml
+Timeline 1.0 Timeline.qml
+TimeSlider 1.0 TimeSlider.qml
+ClipTrack 1.0 ClipTrack.qml
+TopBar 1.0 TopBar.qml
+ControlButtons 1.0 ControlButtons.qml
+ExportDialog 1.0 ExportDialog.qml
+TextCardEditor 1.0 TextCardEditor.qml 

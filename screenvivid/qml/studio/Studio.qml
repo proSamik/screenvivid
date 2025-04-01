@@ -1,10 +1,14 @@
-import QtQuick 6.7
-import QtQuick.Window 6.7
-import QtQuick.Layouts 6.7
-import QtQuick.Controls 6.7
-import QtQuick.Controls.Material 6.7
+import QtQuick
+import QtQuick.Window
+import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Controls.Material
 import "./sidebar"
-import "." // Import local components
+// Remove the complicated imports
+// import "." as Studio
+
+// Import components directly
+// import "qrc:/qml/studio" as Studio
 
 Window {
     id: studioWindow
@@ -152,6 +156,7 @@ Window {
                 id: videoEdit
                 Layout.fillWidth: true
                 Layout.preferredHeight: 180
+                objectName: "videoEdit"
             }
         }
     }

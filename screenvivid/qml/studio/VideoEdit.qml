@@ -1,6 +1,7 @@
-import QtQuick 6.7
-import QtQuick.Controls 6.7
-import "." // Import current directory components
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "."
 
 Rectangle {
     id: videoEdit
@@ -559,6 +560,188 @@ Rectangle {
                     }
                 }
             }
+            
+            // Text cards track
+            Item {
+                id: textCardsTrack
+                width: parent.width
+                height: 40
+                y: zoomTrack.y + zoomTrack.height + 10
+                
+                // Track label
+                Rectangle {
+                    id: textTrackHeader
+                    height: parent.height
+                    width: 150
+                    color: "#1A1D21"
+                    radius: 4
+                    
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 15
+                        spacing: 5
+                        
+                        Rectangle {
+                            width: 18
+                            height: 18
+                            color: "transparent"
+                            Layout.alignment: Qt.AlignVCenter
+                            
+                            Image {
+                                anchors.fill: parent
+                                source: "qrc:/resources/icons/text_card.svg"
+                                sourceSize.width: 18
+                                sourceSize.height: 18
+                                fillMode: Image.PreserveAspectFit
+                            }
+                        }
+                        
+                        Text {
+                            text: "Text Cards"
+                            color: "white"
+                            font.pixelSize: 12
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+                
+                // Background for track
+                Rectangle {
+                    anchors.left: textTrackHeader.right
+                    anchors.leftMargin: 10
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    color: "#282C33"
+                    opacity: 0.7
+                    radius: 4
+                }
+                
+                // Text cards renderer
+                Repeater {
+                    model: videoController.text_cards
+                    
+                    delegate: Rectangle {
+                        id: textCardRect
+                        property var card: modelData
+                        
+                        // Convert from absolute to relative frame positions for display
+                        property int relativeStartFrame: Math.max(0, card.start_frame - videoController.start_frame)
+                        property int relativeEndFrame: Math.min(videoController.end_frame - videoController.start_frame, 
+                                                            card.end_frame - videoController.start_frame)
+                        
+                        x: textTrackHeader.width + 10 + relativeStartFrame * studioWindow.pixelsPerFrame
+                        y: 5
+                        width: (relativeEndFrame - relativeStartFrame) * studioWindow.pixelsPerFrame
+                        height: parent.height - 10
+                        radius: 4
+                        
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#FF9A5A" }
+                            GradientStop { position: 1.0; color: "#FFA66E" }
+                        }
+                        
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            spacing: 5
+                            
+                            Rectangle {
+                                width: 16
+                                height: 16
+                                color: "transparent"
+                                Layout.alignment: Qt.AlignVCenter
+                                
+                                Image {
+                                    anchors.fill: parent
+                                    source: "qrc:/resources/icons/text_card.svg"
+                                    sourceSize.width: 16
+                                    sourceSize.height: 16
+                                    fillMode: Image.PreserveAspectFit
+                                }
+                            }
+                            
+                            Text {
+                                text: card.params.text.length > 20 ? 
+                                    card.params.text.substring(0, 20) + "..." : 
+                                    card.params.text
+                                color: "white"
+                                font.pixelSize: 10
+                                font.bold: true
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+                        }
+                        
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: -15
+                            text: ((card.end_frame - card.start_frame) / videoController.fps).toFixed(1) + "s"
+                            color: "#CCCCCC"
+                            font.pixelSize: 10
+                            visible: textCardRect.width > 60
+                        }
+                        
+                        MouseArea {
+                            id: cardMouseArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.LeftButton) {
+                                    videoController.jump_to_frame(card.start_frame)
+                                } else if (mouse.button === Qt.RightButton) {
+                                    cardContextMenu.x = mouse.x
+                                    cardContextMenu.y = mouse.y
+                                    cardContextMenu.open()
+                                }
+                            }
+                            
+                            onDoubleClicked: function(mouse) {
+                                // Open editor in edit mode
+                                textCardEditor.isEditMode = true
+                                textCardEditor.startFrame = card.start_frame
+                                textCardEditor.endFrame = card.end_frame
+                                textCardEditor.setCardData(card.params)
+                                textCardEditor.visible = true
+                            }
+                        }
+                        
+                        Menu {
+                            id: cardContextMenu
+                            
+                            MenuItem {
+                                text: "Edit"
+                                onTriggered: {
+                                    textCardEditor.isEditMode = true
+                                    textCardEditor.startFrame = card.start_frame
+                                    textCardEditor.endFrame = card.end_frame
+                                    textCardEditor.setCardData(card.params)
+                                    textCardEditor.visible = true
+                                }
+                            }
+                            
+                            MenuItem {
+                                text: "Delete"
+                                onTriggered: {
+                                    videoController.remove_text_card(card.start_frame, card.end_frame)
+                                }
+                            }
+                            
+                            MenuItem {
+                                text: "Preview"
+                                onTriggered: {
+                                    videoController.jump_to_frame(card.start_frame)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             TimeSlider {
                 id: timeSlider
@@ -586,6 +769,66 @@ Rectangle {
                     }
                 }
             }
+
+            ToolButton {
+                id: zoomOutButton
+                anchors.right: parent.right
+                anchors.rightMargin: 15
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 15
+                icon.source: "qrc:/resources/icons/zoom.svg"
+                icon.color: "#e8eaed"
+                width: 40
+                height: 40
+                
+                background: Rectangle {
+                    color: "#282C33"
+                    radius: 20
+                }
+                
+                onClicked: {
+                    videoController.create_automatic_zooms_from_cursor()
+                }
+                
+                ToolTip.text: "Add automatic zoom points"
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+            }
+        }
+    }
+
+    // Text Card Editor
+    TextCardEditor {
+        id: textCardEditor
+        visible: false
+        width: 400
+        height: 450
+        anchors.centerIn: parent
+        z: 1000 // Make sure it appears above other elements
+        
+        onApplyCard: {
+            // Add text card to the video
+            var cardData = textCardEditor.getCardData()
+            if (textCardEditor.isEditMode) {
+                videoController.update_text_card(
+                    textCardEditor.startFrame, 
+                    textCardEditor.endFrame,
+                    textCardEditor.startFrame, // Keep same positions
+                    textCardEditor.endFrame,
+                    cardData
+                )
+            } else {
+                videoController.add_text_card(
+                    textCardEditor.startFrame,
+                    textCardEditor.endFrame,
+                    cardData
+                )
+            }
+            textCardEditor.visible = false
+        }
+        
+        onCancelCard: {
+            textCardEditor.visible = false
         }
     }
 
