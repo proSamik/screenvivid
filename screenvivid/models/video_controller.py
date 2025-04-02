@@ -39,6 +39,9 @@ class VideoControllerModel(QObject):
     zoomEffectsChanged = Signal()
     cursorPositionReady = Signal(float, float)  # Signal for cursor position (normalized x, y)
     textCardsChanged = Signal()  # New signal for text cards changes
+    startFrameChanged = Signal(int)  # Add signal for start frame changes
+    endFrameChanged = Signal(int)  # Add signal for end frame changes
+    videoLenChanged = Signal(float)  # Add signal for video length changes
 
     def __init__(self, frame_provider):
         super().__init__()
@@ -65,15 +68,15 @@ class VideoControllerModel(QObject):
     def total_frames(self):
         return self.video_processor.total_frames
 
-    @Property(int)
+    @Property(int, notify=startFrameChanged)
     def start_frame(self):
         return self.video_processor.start_frame
 
-    @Property(int)
+    @Property(int, notify=endFrameChanged)
     def end_frame(self):
         return self.video_processor.end_frame
 
-    @Property(float)
+    @Property(float, notify=videoLenChanged)
     def video_len(self):
         return self.video_processor.video_len
 
@@ -198,6 +201,14 @@ class VideoControllerModel(QObject):
     def _update_undo_redo_signals(self):
         self.canUndoChanged.emit(self.undo_redo_manager.can_undo())
         self.canRedoChanged.emit(self.undo_redo_manager.can_redo())
+
+    @Property(bool, notify=canUndoChanged)
+    def canUndo(self):
+        return self.undo_redo_manager.can_undo()
+
+    @Property(bool, notify=canRedoChanged)
+    def canRedo(self):
+        return self.undo_redo_manager.can_redo()
 
     @Slot()
     def undo(self):
@@ -522,7 +533,14 @@ class VideoControllerModel(QObject):
 
     @Slot(int, int, dict)
     def add_text_card(self, start_frame, end_frame, card_data):
-        """Add a text card to the video"""
+        """
+        Add a text card to the video
+        
+        Args:
+            start_frame: The start frame of the text card
+            end_frame: The end frame of the text card
+            card_data: Text card parameters dictionary
+        """
         from screenvivid.utils.logging import logger
         
         def do_add_text_card():
@@ -537,15 +555,17 @@ class VideoControllerModel(QObject):
             self.video_processor._text_cards.append(card)
             self.video_processor._text_cards.sort(key=lambda x: x['start_frame'])
             
-            # Update video length if needed - important for playback to continue to the end
-            old_video_len = self.video_processor._video_len
-            new_end_frame = max(end_frame, self.video_processor._end_frame)
+            # Calculate the duration of the text card in frames
+            card_duration = end_frame - start_frame + 1
+            logger.info(f"Text card duration: {card_duration} frames")
             
-            if new_end_frame > self.video_processor._end_frame:
-                logger.info(f"Extending video length to include text card: old end={self.video_processor._end_frame}, new end={new_end_frame}")
-                self.video_processor._end_frame = new_end_frame
-                self.video_processor._video_len = new_end_frame - self.video_processor._start_frame
-                self.videoLenChanged.emit()
+            # Always extend the video end frame by the text card duration
+            # This ensures all subsequent content is shifted forward
+            current_end = self.video_processor.end_frame
+            new_end_frame = current_end + card_duration
+            
+            logger.info(f"Extending video length: {current_end} -> {new_end_frame}")
+            self.video_processor.append_end_frame(new_end_frame)
             
             # Notify about the change
             self.textCardsChanged.emit()
@@ -555,7 +575,17 @@ class VideoControllerModel(QObject):
             # Remove the last added card with the same frame range
             for i, card in enumerate(self.video_processor._text_cards):
                 if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
-                    self.video_processor._removed_text_cards.append(self.video_processor._text_cards.pop(i))
+                    # Save the removed card for potential redo
+                    removed_card = self.video_processor._text_cards.pop(i)
+                    if hasattr(self.video_processor, "_removed_text_cards"):
+                        self.video_processor._removed_text_cards.append(removed_card)
+                    
+                    # If this was the card extending the end frame, recalculate
+                    if end_frame >= self.video_processor.end_frame:
+                        # Check if we need to pop the end frame
+                        if self.video_processor.end_frames and self.video_processor.end_frames[-1] == end_frame:
+                            self.video_processor.pop_end_frame()
+                    
                     self.textCardsChanged.emit()
                     logger.info(f"Removed text card: {start_frame}-{end_frame}")
                     break
@@ -1072,9 +1102,11 @@ class VideoProcessor(QObject):
                 card = TextCard(
                     background_color=text_card_data.get("background_color", "black"),
                     text=text_card_data.get("text", "Lorem ipsum dolor sit amet"),
-                    text_color=text_card_data.get("text_color", "white"),
+                    text_color=text_card_data.get("color", "white"),
+                    duration_seconds=text_card_data.get("duration_seconds", 3.0),
                     horizontal_align=text_card_data.get("horizontal_align", "center"),
-                    vertical_align=text_card_data.get("vertical_align", "middle")
+                    vertical_align=text_card_data.get("vertical_align", "middle"),
+                    text_size=text_card_data.get("font_size", 1.0)
                 )
                 
                 # Get the frame dimensions
@@ -1090,6 +1122,9 @@ class VideoProcessor(QObject):
                     width, 
                     height
                 )
+                
+                # Log success
+                logger.info(f"Text card rendered successfully at frame {current_absolute_frame}")
                 
                 # Convert to RGB and return
                 return cv2.cvtColor(text_frame, cv2.COLOR_BGR2RGB)
@@ -1348,7 +1383,14 @@ class VideoProcessor(QObject):
         self._clip_positions = positions
     
     def add_text_card(self, start_frame, end_frame, card_data):
-        """Add a text card to the video"""
+        """
+        Add a text card to the video
+        
+        Args:
+            start_frame: The start frame of the text card
+            end_frame: The end frame of the text card
+            card_data: Text card parameters dictionary
+        """
         from screenvivid.utils.logging import logger
         
         def do_add_text_card():
@@ -1363,15 +1405,17 @@ class VideoProcessor(QObject):
             self.video_processor._text_cards.append(card)
             self.video_processor._text_cards.sort(key=lambda x: x['start_frame'])
             
-            # Update video length if needed - important for playback to continue to the end
-            old_video_len = self.video_processor._video_len
-            new_end_frame = max(end_frame, self.video_processor._end_frame)
+            # Calculate the duration of the text card in frames
+            card_duration = end_frame - start_frame + 1
+            logger.info(f"Text card duration: {card_duration} frames")
             
-            if new_end_frame > self.video_processor._end_frame:
-                logger.info(f"Extending video length to include text card: old end={self.video_processor._end_frame}, new end={new_end_frame}")
-                self.video_processor._end_frame = new_end_frame
-                self.video_processor._video_len = new_end_frame - self.video_processor._start_frame
-                self.videoLenChanged.emit()
+            # Always extend the video end frame by the text card duration
+            # This ensures all subsequent content is shifted forward
+            current_end = self.video_processor.end_frame
+            new_end_frame = current_end + card_duration
+            
+            logger.info(f"Extending video length: {current_end} -> {new_end_frame}")
+            self.video_processor.append_end_frame(new_end_frame)
             
             # Notify about the change
             self.textCardsChanged.emit()
@@ -1381,7 +1425,17 @@ class VideoProcessor(QObject):
             # Remove the last added card with the same frame range
             for i, card in enumerate(self.video_processor._text_cards):
                 if card['start_frame'] == start_frame and card['end_frame'] == end_frame:
-                    self.video_processor._removed_text_cards.append(self.video_processor._text_cards.pop(i))
+                    # Save the removed card for potential redo
+                    removed_card = self.video_processor._text_cards.pop(i)
+                    if hasattr(self.video_processor, "_removed_text_cards"):
+                        self.video_processor._removed_text_cards.append(removed_card)
+                    
+                    # If this was the card extending the end frame, recalculate
+                    if end_frame >= self.video_processor.end_frame:
+                        # Check if we need to pop the end frame
+                        if self.video_processor.end_frames and self.video_processor.end_frames[-1] == end_frame:
+                            self.video_processor.pop_end_frame()
+                    
                     self.textCardsChanged.emit()
                     logger.info(f"Removed text card: {start_frame}-{end_frame}")
                     break

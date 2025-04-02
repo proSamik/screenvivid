@@ -308,7 +308,9 @@ Item {
                             color: "#7BD57F"
                             Layout.fillWidth: true
                             
-                            property int startSeconds: Math.floor(videoController.absolute_current_frame / videoController.fps)
+                            property int startSeconds: videoController 
+                                ? Math.floor(videoController.absolute_current_frame / videoController.fps) 
+                                : 0
                             property int endSeconds: startSeconds + durationSeconds.value
                             
                             text: formatTime(startSeconds) + " - " + formatTime(endSeconds)

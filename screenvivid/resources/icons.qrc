@@ -40,5 +40,7 @@
         <file>../resources/icons/align_top.svg</file>
         <file>../resources/icons/align_middle.svg</file>
         <file>../resources/icons/align_bottom.svg</file>
+        <file>../resources/icons/undo.svg</file>
+        <file>../resources/icons/redo.svg</file>
     </qresource>
 </RCC>

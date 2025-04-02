@@ -47,8 +47,8 @@ Window {
             anchors.fill: parent
             visible: startupWindow.selectedMode == "safeArea"
             Rectangle {
-                x: windowController.left
-                y: windowController.top
+                x: windowController ? windowController.left : 0
+                y: windowController ? windowController.top : 0
                 width: Screen.desktopAvailableWidth
                 height: Screen.desktopAvailableHeight
                 color: Qt.rgba(0.91, 0.36, 0.05, 0.3)

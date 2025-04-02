@@ -1,5 +1,5 @@
-import QtQuick 6.7
-import QtQuick.Controls 6.7
+import QtQuick
+import QtQuick.Controls
 
 Item {
     id: timeSlider
@@ -28,6 +28,7 @@ Item {
             }
 
             onReleased: {
+                if (!videoController) return;  // Null check
                 var currentFrame = Math.round(
                             timeSlider.x / studioWindow.pixelsPerFrame)
                 videoController.jump_to_frame(currentFrame)
@@ -53,6 +54,7 @@ Item {
 
     Connections {
         target: videoController
+        enabled: videoController !== null  // Only enable connections when videoController exists
         function onCurrentFrameChanged(currentFrame) {
             timeSlider.x = currentFrame * studioWindow.pixelsPerFrame
         }

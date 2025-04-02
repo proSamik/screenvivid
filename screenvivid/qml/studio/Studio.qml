@@ -28,7 +28,7 @@ Window {
     property int fps: 30
     property int totalFrames: 0
     property int pixelsPerFrame: 6
-    property real videoLen: 0
+    property real videoLen: totalFrames / fps  // Calculate from totalFrames
     property int frameWidth: 0
     property int frameHeight: 0
 
@@ -53,8 +53,13 @@ Window {
         readonly property string undoModifier: isMac ? "Meta" : "Ctrl"
 
         function handleUndo() {
-            clipTrackModel.undo()
+            console.log("Undo action triggered")
             videoController.undo()
+        }
+        
+        function handleRedo() {
+            console.log("Redo action triggered")
+            videoController.redo()
         }
 
         function handlePlayPause() {
@@ -90,12 +95,48 @@ Window {
         sequence: shortcutManager.undoModifier + "+Z"
         onActivated: shortcutManager.handleUndo()
     }
+    
+    Shortcut {
+        sequence: shortcutManager.undoModifier + "+Shift+Z"
+        onActivated: shortcutManager.handleRedo()
+    }
+    
+    // Alternative redo shortcut (Ctrl+Y on Windows/Linux)
+    Shortcut {
+        sequence: shortcutManager.isMac ? "" : "Ctrl+Y"
+        enabled: !shortcutManager.isMac
+        onActivated: shortcutManager.handleRedo()
+    }
 
     // Video controller connections
     Connections {
         target: videoController
         function onPlayingChanged(playing) {
             isPlaying = playing
+        }
+        function onTotalFramesChanged() {
+            if (videoController) {
+                totalFrames = videoController.total_frames
+                // Update videoLen after totalFrames has been updated
+                videoLen = totalFrames / fps
+                console.log("Total frames changed: " + totalFrames + ", new videoLen: " + videoLen.toFixed(2) + "s")
+            }
+        }
+        function onEndFrameChanged() {
+            if (videoController) {
+                // Make sure totalFrames reflects any changes to end_frame
+                totalFrames = videoController.total_frames
+                videoLen = totalFrames / fps
+                console.log("End frame changed: total frames = " + totalFrames + ", videoLen = " + videoLen.toFixed(2) + "s")
+            }
+        }
+        function onFpsChanged() {
+            if (videoController) {
+                fps = videoController.fps
+                // Recalculate videoLen when FPS changes
+                videoLen = totalFrames / fps
+                console.log("FPS changed: " + fps + ", new videoLen: " + videoLen.toFixed(2) + "s")
+            }
         }
     }
 
@@ -161,13 +202,46 @@ Window {
         }
     }
 
-    // Initialization
+    // Initialization with safe defaults
     Component.onCompleted: {
-        fps = videoController.fps
-        totalFrames = videoController.total_frames
-        videoLen = videoController.video_len
-        videoController.get_current_frame()
-        videoController.aspect_ratio = "auto"
+        // Set safe defaults first
+        fps = 30
+        totalFrames = 0
+        videoLen = 0
+        frameWidth = 1920
+        frameHeight = 1080
+        
+        // Then update from videoController if available
+        if (videoController) {
+            fps = videoController.fps || 30
+            totalFrames = videoController.total_frames || 0
+            videoLen = totalFrames / fps
+            videoController.get_current_frame()
+            videoController.aspect_ratio = "auto"
+        } else {
+            console.warn("videoController not available during initialization - using default values")
+        }
+    }
+
+    // Connection to ensure properties are updated once videoController is available
+    Connections {
+        target: videoController
+        enabled: videoController !== null  // Only enable when controller exists
+        
+        function onVideoLoaded() {
+            // Update properties when video is loaded
+            fps = videoController.fps
+            totalFrames = videoController.total_frames
+            videoLen = totalFrames / fps
+            console.log("Video loaded, totalFrames: " + totalFrames + ", fps: " + fps)
+        }
+        
+        function onTotalFramesChanged() {
+            if (videoController) {
+                totalFrames = videoController.total_frames
+                console.log("Total frames changed: " + totalFrames + ", new videoLen: " + videoLen)
+            }
+        }
     }
 
     // Cleanup

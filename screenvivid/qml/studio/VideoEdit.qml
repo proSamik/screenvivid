@@ -9,11 +9,13 @@ Rectangle {
     radius: 4
 
     property bool animationEnabled: true
+    property real pixelsPerFrame: studioWindow.pixelsPerFrame
+    property int timelineHeaderWidth: 150  // Width of the timeline header
 
     Flickable {
         id: scrollView
         anchors.fill: parent
-        contentWidth: studioWindow.fps * studioWindow.videoLen * studioWindow.pixelsPerFrame + 200
+        contentWidth: calculateTimelineWidth()
         contentHeight: parent.height
         property real currentScrollX: 0
 
@@ -164,7 +166,7 @@ Rectangle {
                 
                 // Zoom effects renderer
                 Repeater {
-                    model: videoController.zoom_effects
+                    model: videoController ? videoController.zoom_effects : []
                     
                     delegate: Rectangle {
                         id: zoomEffectRect
@@ -172,9 +174,9 @@ Rectangle {
                         
                         // Convert from absolute to relative frame positions for display
                         // This ensures proper positioning on the timeline
-                        property int relativeStartFrame: Math.max(0, effect.start_frame - videoController.start_frame)
-                        property int relativeEndFrame: Math.min(videoController.end_frame - videoController.start_frame, 
-                                                             effect.end_frame - videoController.start_frame)
+                        property int relativeStartFrame: videoController ? Math.max(0, effect.start_frame - videoController.start_frame) : 0
+                        property int relativeEndFrame: videoController ? Math.min(videoController.end_frame - videoController.start_frame, 
+                                                             effect.end_frame - videoController.start_frame) : 0
                         property bool isResizing: false
                         property bool isMoving: false
                         property int dragStartX: 0
@@ -562,227 +564,161 @@ Rectangle {
                 }
             }
             
-            // Text cards track
-            Item {
-                id: textCardsTrack
-                width: parent.width
-                height: 40
-                y: zoomTrack.y + zoomTrack.height + 10
+            // Text cards track visualization
+            Rectangle {
+                id: textCardsBg
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 30
+                y: zoomTrack.y + zoomTrack.height + 5
+                color: "#1e1e1e"
                 
-                // Track label
-                Rectangle {
-                    id: textTrackHeader
-                    height: parent.height
-                    width: 150
-                    color: "#1A1D21"
-                    radius: 4
-                    
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 15
-                        spacing: 5
+                Text {
+                    text: "Text Cards"
+                    color: "#ffffff"
+                    font.pixelSize: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                }
+                
+                // Repeater for text cards
+                Repeater {
+                    model: videoController ? videoController.text_cards : []
+                    delegate: Rectangle {
+                        id: textCardRect
+                        property int startFrame: modelData.start_frame
+                        property int endFrame: modelData.end_frame
+                        property var card: modelData
                         
-                        Rectangle {
-                            width: 18
-                            height: 18
-                            color: "transparent"
-                            Layout.alignment: Qt.AlignVCenter
+                        x: videoController ? (startFrame - videoController.start_frame) * pixelsPerFrame + timelineHeaderWidth : 0
+                        width: (endFrame - startFrame + 1) * pixelsPerFrame
+                        height: textCardsBg.height - 10
+                        y: 5
+                        radius: 2
+                        color: "#FFFFFF"  // White color for text cards
+                        border.color: "#CCCCCC"
+                        border.width: 1
+                        
+                        // Text card label
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 5
                             
+                            // Show icon only if there's enough space
                             Image {
-                                anchors.fill: parent
                                 source: "qrc:/resources/icons/text_card.svg"
-                                sourceSize.width: 18
-                                sourceSize.height: 18
-                                fillMode: Image.PreserveAspectFit
+                                width: 14
+                                height: 14
+                                visible: textCardRect.width > 30
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            
+                            // Duration text
+                            Text {
+                                text: videoController ? ((card.end_frame - card.start_frame + 1) / videoController.fps).toFixed(1) + "s" : ""
+                                color: "#333333"
+                                font.pixelSize: 10
+                                visible: textCardRect.width > 40
+                                anchors.verticalCenter: parent.verticalCenter
                             }
                         }
                         
-                        Text {
-                            text: "Text Cards"
-                            color: "white"
-                            font.pixelSize: 12
-                            Layout.alignment: Qt.AlignVCenter
-                            Layout.fillWidth: true
+                        // Handle clicks
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.LeftButton) {
+                                    // Jump to text card position
+                                    videoController.jump_to_frame(startFrame)
+                                } else if (mouse.button === Qt.RightButton) {
+                                    textCardContextMenu.x = mouse.x
+                                    textCardContextMenu.y = mouse.y
+                                    textCardContextMenu.open()
+                                    // Store the current text card for context menu actions
+                                    textCardContextMenu.textCardStart = startFrame
+                                    textCardContextMenu.textCardEnd = endFrame
+                                }
+                            }
+                            
+                            onDoubleClicked: function(mouse) {
+                                if (mouse.button === Qt.LeftButton) {
+                                    // Open text card editor
+                                    textCardEditor.isEditMode = true
+                                    textCardEditor.startFrame = startFrame
+                                    textCardEditor.endFrame = endFrame
+                                    textCardEditor.text = card.params.text
+                                    textCardEditor.backgroundColor = card.params.background_color
+                                    textCardEditor.textColor = card.params.text_color
+                                    textCardEditor.verticalAlignment = card.params.vertical_align
+                                    textCardEditor.horizontalAlignment = card.params.horizontal_align
+                                    textCardEditor.visible = true
+                                }
+                            }
+                            
+                            // Show tooltip with text card information
+                            hoverEnabled: true
+                            ToolTip.visible: containsMouse
+                            ToolTip.text: {
+                                var duration = ((endFrame - startFrame + 1) / videoController.fps).toFixed(1)
+                                var startTime = (startFrame / videoController.fps).toFixed(1)
+                                var endTime = (endFrame / videoController.fps).toFixed(1)
+                                return "Text: " + card.params.text.substring(0, 20) + (card.params.text.length > 20 ? "..." : "") +
+                                       "\nDuration: " + duration + "s (" + startTime + "s - " + endTime + "s)"
+                            }
+                            ToolTip.delay: 500
                         }
                     }
                 }
                 
-                // Background for track
-                Rectangle {
-                    anchors.left: textTrackHeader.right
-                    anchors.leftMargin: 10
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    color: "#282C33"
-                    opacity: 0.7
-                    radius: 4
-                }
-                
-                // Text cards renderer
-                Repeater {
-                    model: videoController.text_cards
+                // Context menu for text cards
+                Menu {
+                    id: textCardContextMenu
                     
-                    delegate: Rectangle {
-                        id: textCardRect
-                        property var card: modelData
-                        
-                        // Convert from absolute to relative frame positions for display
-                        property int relativeStartFrame: Math.max(0, card.start_frame - videoController.start_frame)
-                        property int relativeEndFrame: Math.min(videoController.end_frame - videoController.start_frame, 
-                                                            card.end_frame - videoController.start_frame)
-                        property real duration: (card.end_frame - card.start_frame + 1) / videoController.fps
-                        
-                        x: textTrackHeader.width + 10 + relativeStartFrame * studioWindow.pixelsPerFrame
-                        y: 5
-                        width: (relativeEndFrame - relativeStartFrame) * studioWindow.pixelsPerFrame
-                        height: parent.height - 10
-                        radius: 4
-                        
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#FF9A5A" }
-                            GradientStop { position: 1.0; color: "#FFA66E" }
-                        }
-                        
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 5
-                            spacing: 5
-                            
-                            Rectangle {
-                                width: 16
-                                height: 16
-                                color: "transparent"
-                                Layout.alignment: Qt.AlignVCenter
-                                
-                                Image {
-                                    anchors.fill: parent
-                                    source: "qrc:/resources/icons/text_card.svg"
-                                    sourceSize.width: 16
-                                    sourceSize.height: 16
-                                    fillMode: Image.PreserveAspectFit
+                    property int textCardStart: -1
+                    property int textCardEnd: -1
+                    
+                    MenuItem {
+                        text: "Edit Text Card"
+                        onTriggered: {
+                            var card = null;
+                            for (var i = 0; i < videoController.text_cards.length; i++) {
+                                var c = videoController.text_cards[i];
+                                if (c.start_frame === textCardContextMenu.textCardStart && 
+                                    c.end_frame === textCardContextMenu.textCardEnd) {
+                                    card = c;
+                                    break;
                                 }
                             }
                             
-                            Text {
-                                text: card.params.text.length > 20 ? 
-                                    card.params.text.substring(0, 20) + "..." : 
-                                    card.params.text
-                                color: "white"
-                                font.pixelSize: 10
-                                font.bold: true
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignVCenter
-                            }
-                            
-                            Text {
-                                text: duration.toFixed(1) + "s"
-                                color: "white"
-                                font.pixelSize: 10
-                                font.bold: true
-                                visible: textCardRect.width > 70
-                                Layout.alignment: Qt.AlignVCenter
+                            if (card) {
+                                textCardEditor.isEditMode = true
+                                textCardEditor.startFrame = card.start_frame
+                                textCardEditor.endFrame = card.end_frame
+                                textCardEditor.text = card.params.text
+                                textCardEditor.backgroundColor = card.params.background_color
+                                textCardEditor.textColor = card.params.text_color
+                                textCardEditor.verticalAlignment = card.params.vertical_align
+                                textCardEditor.horizontalAlignment = card.params.horizontal_align
+                                textCardEditor.visible = true
                             }
                         }
-                        
-                        // Make sure card is visible with its duration
-                        MouseArea {
-                            id: cardHoverArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            acceptedButtons: Qt.NoButton // Don't interfere with other mouse areas
+                    }
+                    
+                    MenuItem {
+                        text: "Delete Text Card"
+                        onTriggered: {
+                            videoController.remove_text_card(textCardContextMenu.textCardStart, 
+                                                         textCardContextMenu.textCardEnd)
                         }
-                        
-                        // Tooltip showing duration
-                        ToolTip.visible: cardHoverArea.containsMouse
-                        ToolTip.text: formatDuration(duration) + " (" + card.start_frame + " to " + card.end_frame + ")"
-                        
-                        function formatDuration(seconds) {
-                            var mins = Math.floor(seconds / 60);
-                            var secs = Math.floor(seconds % 60);
-                            return mins + ":" + (secs < 10 ? "0" : "") + secs;
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            
-                            onClicked: {
-                                // Jump to the frame when clicked
-                                videoController.jump_to_frame(card.start_frame)
-                            }
-                            
-                            onDoubleClicked: {
-                                // Edit the text card when double-clicked
-                                editTextCard(card.start_frame, card.end_frame, card.params)
-                            }
-                        }
-                        
-                        // Context menu for right-click operations
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: textCardContextMenu.popup()
-                        }
-                        
-                        Menu {
-                            id: textCardContextMenu
-                            
-                            MenuItem {
-                                text: "Edit Text Card"
-                                icon.source: "qrc:/resources/icons/edit.svg"
-                                onTriggered: {
-                                    editTextCard(card.start_frame, card.end_frame, card.params)
-                                }
-                            }
-                            
-                            MenuItem {
-                                text: "Delete Text Card"
-                                icon.source: "qrc:/resources/icons/trash.svg"
-                                onTriggered: {
-                                    // Delete the text card and close the gap
-                                    videoController.remove_text_card_and_close_gap(card.start_frame, card.end_frame)
-                                }
-                            }
-                            
-                            MenuItem {
-                                text: "Preview at This Position"
-                                icon.source: "qrc:/resources/icons/play.svg"
-                                onTriggered: {
-                                    videoController.jump_to_frame(card.start_frame)
-                                }
-                            }
-                        }
-                        
-                        // Function to edit text card
-                        function editTextCard(startFrame, endFrame, params) {
-                            var textCardEditor = getTextCardEditor();
-                            if (textCardEditor) {
-                                textCardEditor.isEditMode = true;
-                                textCardEditor.startFrame = startFrame;
-                                textCardEditor.endFrame = endFrame;
-                                textCardEditor.setCardData(params);
-                                textCardEditor.visible = true;
-                            }
-                        }
-                        
-                        // Function to get the text card editor instance
-                        function getTextCardEditor() {
-                            // Find the textCardEditor that was defined in ControlButtons.qml
-                            for (var i = 0; i < studioWindow.contentItem.children.length; i++) {
-                                var overlay = studioWindow.contentItem.children[i];
-                                if (overlay.objectName === "overlay") {
-                                    for (var j = 0; j < overlay.children.length; j++) {
-                                        var child = overlay.children[j];
-                                        if (child.objectName === "textCardEditor") {
-                                            return child;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // If not found, try to get it from the ControlButtons
-                            return textCardEditor;
+                    }
+                    
+                    MenuItem {
+                        text: "Jump to Text Card"
+                        onTriggered: {
+                            videoController.jump_to_frame(textCardContextMenu.textCardStart)
                         }
                     }
                 }
@@ -904,6 +840,57 @@ Rectangle {
             
             zoomTrack.visible = false
             zoomTrack.visible = true
+        }
+    }
+
+    // Zoom timeline width calculation based on content
+    function calculateTimelineWidth() {
+        if (!videoController) return width;
+        
+        // Calculate maximum width needed based on content
+        let maxEndFrame = 0;
+        
+        // Check zoom effects
+        if (videoController.zoom_effects) {
+            for (let i = 0; i < videoController.zoom_effects.length; i++) {
+                let effect = videoController.zoom_effects[i];
+                if (effect.end_frame > maxEndFrame) {
+                    maxEndFrame = effect.end_frame;
+                }
+            }
+        }
+        
+        // Check text cards
+        if (videoController.text_cards) {
+            for (let i = 0; i < videoController.text_cards.length; i++) {
+                let card = videoController.text_cards[i];
+                if (card.end_frame > maxEndFrame) {
+                    maxEndFrame = card.end_frame;
+                }
+            }
+        }
+        
+        // If no content extends beyond video, use video end frame
+        if (maxEndFrame === 0 && videoController.end_frame) {
+            maxEndFrame = videoController.end_frame;
+        }
+        
+        // Calculate width based on max end frame
+        let calculatedWidth = (maxEndFrame - videoController.start_frame + 1) * pixelsPerFrame;
+        return Math.max(width, calculatedWidth);
+    }
+    
+    // Update timeline width when content changes
+    Connections {
+        target: videoController
+        function onZoomEffectsChanged() {
+            scrollView.contentWidth = calculateTimelineWidth();
+        }
+        function onTextCardsChanged() {
+            scrollView.contentWidth = calculateTimelineWidth();
+        }
+        function onTotalFramesChanged() {
+            scrollView.contentWidth = calculateTimelineWidth();
         }
     }
 }

@@ -422,7 +422,8 @@ Rectangle {
                 
                 Text {
                     function formatTime(frames) {
-                        var seconds = frames / videoController.fps;
+                        var fps = videoController ? videoController.fps : defaultFps;
+                        var seconds = frames / fps;
                         var mins = Math.floor(seconds / 60);
                         var secs = Math.floor(seconds % 60);
                         return mins + ":" + (secs < 10 ? "0" : "") + secs;
@@ -467,7 +468,43 @@ Rectangle {
                     text: "Save"
                     Layout.preferredWidth: 100
                     Layout.preferredHeight: 40
-                    onClicked: applyCard()
+                    onClicked: {
+                        console.log("Saving text card with text: " + textArea.text)
+                        
+                        // Calculate endFrame based on duration in seconds
+                        var durationFrames = Math.round(cardDuration * (videoController ? videoController.fps : 30));
+                        endFrame = startFrame + durationFrames;
+                        
+                        console.log("Text card frames: start=" + startFrame + ", end=" + endFrame + 
+                                   " (duration: " + cardDuration + "s, " + durationFrames + " frames)");
+                        
+                        // Create a gap in the timeline at the current position
+                        if (clipTrackModel) {
+                            console.log("Creating gap at frame " + startFrame + " with size " + durationFrames);
+                            clipTrackModel.create_gap_at_frame(startFrame, durationFrames);
+                        } else {
+                            console.log("Warning: clipTrackModel not available, can't create gap");
+                        }
+                        
+                        // Add or update the text card with start/end frames and text content
+                        videoController.add_text_card(
+                            startFrame,
+                            endFrame,
+                            {
+                                "text": textArea.text,
+                                "font_size": textSize,
+                                "font_family": "Arial",
+                                "color": selectedTextColor,
+                                "position": "center",
+                                "background_color": selectedBgColor,
+                                "background_opacity": 1.0,
+                                "duration_seconds": cardDuration
+                            }
+                        );
+                        
+                        // Close the editor
+                        visible = false
+                    }
                     
                     background: Rectangle {
                         color: "#545EEE"
@@ -483,5 +520,34 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // Display duration of card in seconds (frames / fps)
+    property real durationSeconds: {
+        if (!videoController) return 3.0;  // Default if no controller
+        if (startFrame < 0 || endFrame < 0) return 3.0;  // Default if frames not set
+        
+        var framesDuration = endFrame - startFrame + 1;
+        return framesDuration / videoController.fps;
+    }
+    
+    // Default fps for calculations when videoController is not available
+    property int defaultFps: 30
+    
+    onDurationSecondsChanged: {
+        // Update end frame based on duration
+        if (videoController && startFrame >= 0) {
+            var framesNeeded = Math.round(durationSeconds * videoController.fps);
+            endFrame = startFrame + framesNeeded - 1;
+        }
+    }
+    
+    // Format time safely (protecting against videoController being null)
+    function formatTime(frames) {
+        var fps = videoController ? videoController.fps : defaultFps;
+        var seconds = frames / fps;
+        var mins = Math.floor(seconds / 60);
+        var secs = Math.floor(seconds % 60);
+        return mins + ":" + (secs < 10 ? "0" : "") + secs;
     }
 } 

@@ -139,6 +139,36 @@ Item {
                 spacing: 10
                 
                 ToolButton {
+                    id: undoButton
+                    icon.source: "qrc:/resources/icons/undo.svg"
+                    icon.color: "#e8eaed"
+                    icon.width: 22
+                    icon.height: 22
+                    onClicked: videoController ? videoController.undo() : {}
+                    enabled: videoController ? videoController.canUndo : false
+                    
+                    property bool isMac: Qt.platform.os === "osx"
+                    ToolTip.text: isMac ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                }
+                
+                ToolButton {
+                    id: redoButton
+                    icon.source: "qrc:/resources/icons/redo.svg"
+                    icon.color: "#e8eaed"
+                    icon.width: 22
+                    icon.height: 22
+                    onClicked: videoController ? videoController.redo() : {}
+                    enabled: videoController ? videoController.canRedo : false
+                    
+                    property bool isMac: Qt.platform.os === "osx"
+                    ToolTip.text: isMac ? "Redo (⌘⇧Z)" : "Redo (Ctrl+Shift+Z)"
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 500
+                }
+                
+                ToolButton {
                     id: cutButton
                     icon.source: "qrc:/resources/icons/cut.svg"
                     icon.color: "#e8eaed"
